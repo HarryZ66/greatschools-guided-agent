@@ -1,7 +1,8 @@
 """Load school documents into OpenSearch, with a Titan embedding per school.
 
 Usage (from the repo root):
-    AWS_PROFILE=gs-sandbox .venv/bin/python data/ingest.py data/raw/schools_sample.json --recreate
+    AWS_PROFILE=gs-sandbox .venv/bin/python data/ingest.py data/raw/schools_sample.json \
+        data/generated/schools_generated.json --recreate
 
 The OpenSearch endpoint is read from infra/cdk-outputs.json (written by `cdk deploy`),
 or from the SEARCH_ENDPOINT environment variable.
@@ -112,7 +113,7 @@ def embed(bedrock, text: str) -> list[float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("file", type=Path, help="JSON list of school documents")
+    parser.add_argument("files", type=Path, nargs="+", help="JSON files, each a list of school documents")
     parser.add_argument("--recreate", action="store_true", help="delete and recreate the index first")
     args = parser.parse_args()
 
@@ -125,7 +126,7 @@ def main() -> None:
     if not client.indices.exists(index=INDEX):
         client.indices.create(index=INDEX, body=MAPPING)
 
-    schools = json.loads(args.file.read_text())
+    schools = [school for path in args.files for school in json.loads(path.read_text())]
     actions = []
     for i, school in enumerate(schools, 1):
         doc = to_document(school)
