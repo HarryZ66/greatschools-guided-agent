@@ -15,7 +15,7 @@ from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field
 from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
-from strands.models import BedrockModel
+from strands.models import BedrockModel, CacheConfig
 
 from . import needs as N
 from . import programs as P
@@ -135,14 +135,17 @@ class GuidedSession:
         self.last_programs: dict | None = None
         self.programs_fresh = False  # show program cards only on the turn they were searched
         self.seen_programs: set[str] = set()
-        self.usage = {"inputTokens": 0, "outputTokens": 0, "model_calls": 0}
+        self.usage = {"inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0, "cacheWriteInputTokens": 0,
+                      "model_calls": 0}
+        self._usage_agent, self._usage_seen = None, {}
         self.agent = self._new_agent()
 
     def _new_agent(self, messages: list | None = None) -> Agent:
         return Agent(
             # Claude 5.x models on Bedrock reject `temperature`, so it's left at the default.
+            # Prompt caching: the system prompt, tool specs and earlier turns repeat on every call.
             model=BedrockModel(model_id=MAIN_MODEL, boto_session=boto3.Session(region_name=REGION),
-                               max_tokens=4000),
+                               max_tokens=4000, cache_config=CacheConfig(strategy="auto")),
             tools=self._tools(),
             system_prompt=SYSTEM_PROMPT.format(catalog=_catalog_text()),
             conversation_manager=SlidingWindowConversationManager(window_size=60),
@@ -275,12 +278,18 @@ class GuidedSession:
                      f"{json.dumps(self._needs_for_prompt())}.)")
             self.agent = self._new_agent()
             result = self.agent(f"{recap}\n\n{text}", structured_output_model=Decision)
-        used = result.metrics.accumulated_usage
-        self.usage["inputTokens"] += used.get("inputTokens", 0)
-        self.usage["outputTokens"] += used.get("outputTokens", 0)
-        self.usage["model_calls"] += result.metrics.cycle_count
+        self._add_usage(result.metrics)
         decision: Decision = result.structured_output
         return self._blocks(decision)
+
+    def _add_usage(self, metrics) -> None:
+        """Strands' counters are running totals for the agent, so add only what this turn used."""
+        now = {**metrics.accumulated_usage, "model_calls": metrics.cycle_count}
+        if self.agent is not self._usage_agent:  # a fresh agent after a fallback starts from zero
+            self._usage_agent, self._usage_seen = self.agent, {}
+        for key in self.usage:
+            self.usage[key] += now.get(key, 0) - self._usage_seen.get(key, 0)
+        self._usage_seen = now
 
     def _drop_old_thinking(self) -> None:
         """Remove thinking blocks from finished turns.

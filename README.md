@@ -30,6 +30,8 @@ schools with evidence. It says so when data is missing or stale instead of guess
 | Elastic Load Balancing (ALB) | Routes traffic to the agent task |
 | Amazon CloudFront | One HTTPS URL: `/api/*` goes to the agent, everything else to the frontend |
 | Amazon ECR | Stores the agent image (created by CDK) |
+| AWS WAF | Rate limit on agent turns and IP reputation blocking at CloudFront |
+| Amazon CloudWatch | Container logs (14 days) and WAF metrics |
 
 All resources are in `us-east-1`.
 
@@ -131,15 +133,39 @@ Latest run on Claude Sonnet 5.5 (full table in [`evals/results/latest.md`](evals
 | Guide answers citing a guide entry | 5 / 5 (and none for a term the guide lacks) |
 | Program cases (fill a gap, interest match, past-only excluded, nothing found) | 5 / 5 |
 | Errors | 0 |
-| Latency per turn | median 6.2 s, max 16.1 s |
-| Tokens per turn | ~11,400 |
-| Estimated cost per turn | ~$0.044 (assuming $3 / $15 per million input / output tokens) |
+| Latency per turn | median 6.4 s, max 16.0 s |
+| Tokens per turn | ~10,900, 83% of input served from the prompt cache |
+| Estimated cost per turn | ~$0.020 with prompt caching, vs ~$0.041 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
 
 In 5 of 5 runs, the demo query found the library robotics club that covers Tamarind Cove's
 5–6pm care gap and asked the parent whether that works.
 
 Load test against the deployed URL: 8 parents searching at the same moment all got answers
 (median 7.7 s, max 12.2 s).
+
+Other tests:
+
+```bash
+cd agent && ../.venv/bin/pytest -q tests                  # 24 unit tests of verify rules, hints, programs (no AWS needed)
+python3 evals/smoke_api.py https://<cloudfront-domain>    # 24 end-to-end API checks against a deployment
+```
+
+Before a demo, clear test traffic from `/api/metrics`:
+
+```bash
+AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 .venv/bin/python data/reset_metrics.py --yes
+```
+
+## Security
+
+- The load balancer only accepts traffic from CloudFront (AWS-managed prefix list), so the WAF
+  can't be bypassed.
+- AWS WAF on CloudFront limits each IP to 300 agent turns per 5 minutes (each turn calls
+  Bedrock) and blocks addresses on Amazon's IP reputation list.
+- The agent's task role can only use its OpenSearch domain, its DynamoDB table and Bedrock model
+  invocation. OpenSearch requires IAM-signed requests over HTTPS, with encryption at rest and
+  between nodes. Logs are kept for 14 days.
+- No login, by design (out of scope). Saved lists are keyed by an anonymous session id.
 
 ## Decisions
 

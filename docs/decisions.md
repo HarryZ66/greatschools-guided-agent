@@ -71,6 +71,21 @@ before the parent needs it, the trade-off hint tells the agent to look for progr
 school covering the gap, then still let the parent choose. The sample programs were all in
 other states, so we generated Miami-area programs in the same format.
 
+## 011: Rate limit and lock the origin
+
+The public URL calls Bedrock on every agent turn, so anyone could run up the bill. AWS WAF on
+CloudFront allows 300 turns per IP per 5 minutes (a busy parent uses a few a minute; a whole
+demo room behind one NAT address stays well under it) and blocks Amazon's IP reputation list.
+The load balancer's security group only admits CloudFront's managed prefix list, so nobody can
+skip the WAF by calling the load balancer directly.
+
+## 012: Prompt caching
+
+The system prompt, tool definitions and earlier turns are resent on every model call. Bedrock
+prompt caching (Strands `CacheConfig(strategy="auto")`) serves about 83% of input tokens from the
+cache, roughly halving the estimated cost per turn ($0.041 to $0.020) with no change in latency
+or eval results. At GreatSchools' scale this is the single biggest cost lever.
+
 ## 004: Models
 
 - Main agent: Claude Sonnet 5.5 on Bedrock (`us.anthropic.claude-sonnet-5-5`)
