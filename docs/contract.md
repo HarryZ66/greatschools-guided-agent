@@ -11,6 +11,11 @@ this list. It never invents a need outside the list; anything it can't map goes 
 
 Each need is used as `require`, `prefer` or `avoid`.
 
+The "Search (OpenSearch)" column is built in code (`search.BOOSTS`, decision 007): required grade,
+type, location and `high_performing` become filters; everything else becomes weighted boosts.
+Avoided needs lower the score. Search only decides which 50 schools come back; status still comes
+from section 2.
+
 | id | Example parent words | Search (OpenSearch) | Evidence field(s) checked by code | Notes |
 |---|---|---|---|---|
 | `grade_level` | "middle school", "my 6th grader" | filter `level_codes` (p, e, m, h) | `level_codes` | Always required. Ask if missing. |
@@ -24,7 +29,7 @@ Each need is used as `require`, `prefer` or `avoid`.
 | `gifted` | "gifted program", "advanced" | boost `gifted_talented: true` | `gifted_talented`, `osp.student_clubs: advanced_courses` | |
 | `special_ed` | "IEP", "special needs" | boost review topic `Special Ed / IEP` positive | `swd_test_scores_rating`, review topic `Special Ed / IEP` | |
 | `ell_support` | "English learner", "Spanish speaking" | boost `ell.tier` high / above_average | `ell.tier`, `osp.foreign_language`, `osp` translation values | |
-| `safety` | "safe", "no bullying" | penalize high negative share for topic `Bullying / Safety` | review topic `Bullying / Safety`, `osp` anti_bullying | Usually `avoid` (avoid bullying). |
+| `safety` | "safe", "no bullying" | penalize high negative share for topic `Bullying / Safety` | review topic `Bullying / Safety`, `osp` anti_bullying | Means "safe, low bullying", so use `require` or `prefer`. "Avoid bullying" is this need wanted; code reads an `avoid` here as `require`. |
 | `attendance` | "kids actually show up" | boost `high_attendance.tier: good` | `high_attendance.tier`, `attendance_rate` | 10 of 16 schools are under 70%: confirm what the field means before ranking on it. |
 | `arts` | "art", "music", "drama" | boost `osp.arts_*` present | `osp.arts_visual`, `osp.arts_music`, `osp.arts_performing_written` | |
 | `sports` | "soccer", "sports" | boost `osp.boys_sports` / `osp.girls_sports` | same | |
@@ -92,6 +97,24 @@ Event types:
 
 Omit `session_id` on the first turn; every response returns the `session_id` to send next time.
 
+Questions about terms ("what's a charter school?") are plain `query` events; the agent answers them
+with a `text` block built from the glossary (decision 012).
+
+`POST /api/turn/stream` takes the same body and answers with server-sent events:
+
+```
+event: progress
+data: {"type": "progress", "text": "Checked 12 schools; ranking the top 8."}
+
+event: result
+data: {"type": "result", "response": {"session_id": "abc123", "blocks": [...], "elapsed_ms": 6400}}
+```
+
+On failure the last event is `{"type": "error", "status": 400 | 500, "detail": "..."}`.
+
+If the model fails, the response still arrives with `"fallback": true` and blocks built by code
+(section 5).
+
 Saving and feedback skip the agent entirely:
 
 - `POST /api/saved`: `{session_id, school_id}` → `{saved: [...]}`
@@ -127,12 +150,19 @@ type and renders them in order. The agent chooses which blocks to send.
     {"need": "after_school_care", "mode": "require", "label": "Care until 6pm", "value": "18:00", "source": "stated"},
     {"need": "stem", "mode": "prefer", "label": "STEM", "source": "stated"}
   ],
-  "unmapped": []
+  "unmapped": ["Montessori"],
+  "suggested": [
+    {"need": "transportation", "label": "School bus", "why": "You work until 6pm, so a bus may help."}
+  ]
 }
 ```
 
 `source` is `stated`, `inferred` (the agent assumed it: show it editable and highlighted) or
 `answered` (from a clarifying question).
+
+`unmapped` lists wishes in the parent's words that no need can check: show them as "can't check
+yet". `suggested` lists up to 2 catalog needs the parent didn't mention; tapping one sends a
+`chip_edit` that adds it (mode `prefer`). Both stay through chip edits until the agent's next answer.
 
 ### `clarifying_question`
 
@@ -154,7 +184,8 @@ At most one per turn.
 
 ### `progress`
 
-Streamed while the agent works (the "I checked this for you" trace).
+Sent as `progress` events by `/api/turn/stream` while the agent works (the "I checked this for
+you" trace). Tools write the text in code. Not part of the `blocks` list.
 
 ```json
 {"type": "progress", "text": "Checking after-school hours for 9 schools…"}
@@ -207,7 +238,8 @@ Streamed while the agent works (the "I checked this for you" trace).
 
 ### `text`
 
-Plain answer, e.g. a term definition.
+Plain answer, e.g. a term definition. An answer built from the glossary ends with a line naming it
+as the source.
 
 ```json
 {"type": "text", "markdown": "**Charter school**: a free public school run independently, often entered by lottery."}
@@ -215,8 +247,12 @@ Plain answer, e.g. a term definition.
 
 ## 5. Rules the backend enforces
 
-- Every `evidence` item must point to a field that `verify_criteria` actually returned.
-  Responses that cite anything else are rejected and retried once.
-- The response must match this schema; on a second failure the backend falls back to
-  `school_results` built directly from code.
-- At most about 6 tool calls per turn.
+- Statuses, evidence, scores and `watch_out` come only from code, so evidence always points to
+  fields `verify` returned.
+- An `evidence_callout` (model-written text) is dropped if it names a school the search didn't
+  return, if that school has nothing to call out, or if it uses a number that isn't in that
+  school's checked data (decision 010).
+- The response must match this schema. If the model fails, the backend answers from code:
+  chips, plus results or a comparison only if they were computed this turn, and a short note
+  (`"fallback": true`).
+- At most 6 tool calls per turn; later calls return an error that tells the model to answer.

@@ -12,11 +12,25 @@ schools with evidence. It says so when data is missing or stale instead of guess
 | Path | What's there |
 |---|---|
 | `infra/` | AWS CDK app (Python) that defines every AWS resource |
-| `agent/` | Python agent (Strands Agents on Amazon Bedrock) and its tools |
-| `frontend/` | React app for parents |
+| `agent/` | Python agent (Strands Agents on Amazon Bedrock), its tools, glossary content and offline tests |
+| `frontend/` | `placeholder/`: a one-page test client, served until the parent app is built |
 | `data/` | Synthetic data generator and OpenSearch ingestion scripts |
-| `evals/` | Test queries and evaluation scripts |
-| `docs/` | Architecture notes and decision records |
+| `docs/` | API contract (`contract.md`) and decision records (`decisions.md`) |
+
+## Choices we made
+
+GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisions.md`](docs/decisions.md).
+
+| Area | Our choice |
+|---|---|
+| Language | Python for the agent, API, data scripts and infrastructure |
+| Model | Claude Sonnet 5.5 on Bedrock for the agent; Titan Text Embeddings v2 for semantic search |
+| How agentic | A guided agent. The model picks its tools (search, school profile, glossary), asks at most one question per turn and spots gaps. Code decides every status, score and piece of evidence. At most 6 tool calls per turn. |
+| Agent framework | Strands Agents |
+| Compute | One ARM64 Fargate task behind an ALB and CloudFront |
+| Infrastructure as code | AWS CDK (Python) |
+| Frontend | Single-page web app served from S3 through CloudFront; a placeholder page for now |
+| Scope | Schools only. Programs are out of scope (decision 008). |
 
 ## AWS services
 
@@ -31,7 +45,8 @@ schools with evidence. It says so when data is missing or stale instead of guess
 | Amazon CloudFront | One HTTPS URL: `/api/*` goes to the agent, everything else to the frontend |
 | Amazon ECR | Stores the agent image (created by CDK) |
 
-All resources are in `us-east-1`.
+All resources are in `us-east-1`. The `us.` Claude model ID is a cross-region inference profile, so
+Bedrock may run some model requests in another US region (decision 004).
 
 ```
 Browser ──HTTPS──▶ CloudFront ──/api/*──▶ ALB ──▶ Fargate task (FastAPI + Strands agent)
@@ -67,15 +82,21 @@ cdk destroy --all
 
 ## Load data
 
+We load GreatSchools' 25 sample schools and 80 generated Miami-area schools into one index. The
+sample file isn't committed (`data/raw/` is ignored), so copy it in first.
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r agent/requirements.txt
+mkdir -p data/raw && cp "../Sample Data/schools_sample.json" data/raw/   # GreatSchools' sample
 .venv/bin/python data/generate.py --count 80            # synthetic Miami-area schools
 AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 \
-  .venv/bin/python data/ingest.py data/generated/schools_generated.json --recreate
+  .venv/bin/python data/ingest.py data/raw/schools_sample.json data/generated/schools_generated.json --recreate
 ```
 
-All generated schools are fictional. Records carry `"synthetic_generated": true`.
+All generated schools are fictional. Records carry `"synthetic_generated": true`. The sample has
+no after-school care hours, tuition or profile dates, so those needs show as "missing" for sample
+schools. That's expected.
 
 ## Run the agent API locally
 
@@ -87,11 +108,19 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvi
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/turn` | Query, answer a question, compare two schools, or edit a chip (see `docs/contract.md`) |
+| `POST /api/turn/stream` | Same as `/api/turn`, as server-sent events: progress while the agent works, then the result |
 | `POST /api/saved`, `GET /api/saved?session_id=`, `DELETE /api/saved/{school_id}?session_id=` | Saved list |
 | `POST /api/feedback` | Thumbs up/down on a result |
 | `GET /api/schools/{school_id}` | Full school record for the profile view |
 | `GET /api/metrics` | Saves-to-searches, thumbs relevance, criteria per search |
 | `GET /api/health` | Health check |
+
+Run the offline tests (no AWS needed):
+
+```bash
+../.venv/bin/pip install pytest httpx
+PYTHONPATH=. ../.venv/bin/python -m pytest -q      # from agent/
+```
 
 Try it from the command line without the API: `PYTHONPATH=. ../.venv/bin/python scripts/try_agent.py "middle school near Miami with STEM, I work until 6"`
 
