@@ -25,7 +25,7 @@ CATALOG: dict[str, dict[str, str]] = {
     "gifted": {"label": "Gifted program", "value": "none"},
     "special_ed": {"label": "Special ed / IEP support", "value": "none"},
     "ell_support": {"label": "English learner support", "value": "none"},
-    "safety": {"label": "Safe, low bullying", "value": "none"},
+    "safety": {"label": "Safe, low bullying", "value": "none. Means the parent wants a safe school; use require or prefer, never avoid"},
     "attendance": {"label": "Good attendance", "value": "none"},
     "arts": {"label": "Arts", "value": "none"},
     "sports": {"label": "Sports", "value": "none"},
@@ -194,8 +194,10 @@ def v_after_school_care(school: dict, value: Any) -> dict:
     ev = [_ev("after_care_end_time", end, school.get("after_care_as_of"))]
     if value and end < value:
         return _result("after_school_care", PARTIAL, ev, f"Care ends at {end}; you need {value}.")
-    if _profile_stale(school):
-        return _result("after_school_care", PARTIAL, ev, f"Care hours are from {school['after_care_as_of'][:7]}; confirm them.")
+    as_of = school.get("after_care_as_of")
+    age = _age_days(as_of)
+    if age is not None and age > FIELD_STALE_DAYS:
+        return _result("after_school_care", PARTIAL, ev, f"Care hours are from {as_of[:7]}; confirm them.")
     return _result("after_school_care", CONFIRMED, ev)
 
 
@@ -337,11 +339,20 @@ RULES: dict[str, Callable[[dict, Any], dict]] = {
 
 _INVERT = {CONFIRMED: ATTENTION, ATTENTION: CONFIRMED}
 
+# Needs that only make sense as something wanted. "Avoid bullying" means "want safety",
+# so an avoid on these is read as require; inverting it would flag the safest schools.
+WANTED_ONLY = {"safety"}
+
+
+def normalize_mode(need: dict) -> str:
+    mode = need.get("mode", "prefer")
+    return "require" if mode == "avoid" and need.get("need") in WANTED_ONLY else mode
+
 
 def verify(school: dict, need: dict) -> dict:
     """Status of one need for one school. `need` is {"need", "mode", "value"}."""
     result = RULES[need["need"]](school, need.get("value"))
-    result["mode"] = need.get("mode", "prefer")
+    result["mode"] = normalize_mode(need)
     if result["mode"] == "avoid":
         result["status"] = _INVERT.get(result["status"], result["status"])
     return result

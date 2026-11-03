@@ -3,6 +3,7 @@
 import json
 from collections import Counter
 from functools import lru_cache
+from typing import Any, Callable
 
 import boto3
 from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
@@ -53,8 +54,55 @@ def resolve_location(value: dict) -> dict | None:
     return {"lat": sum(p["lat"] for p in points) / len(points), "lon": sum(p["lon"] for p in points) / len(points)}
 
 
+CANDIDATES = 50  # schools pulled from OpenSearch per search; code verifies and re-ranks these
+MODE_BOOST = {"require": 3.0, "prefer": 1.0, "avoid": 1.0}
+SEMANTIC_BOOST = 2.0
+
+
+def _reviews_positive(topic: str) -> dict:
+    """Schools where at least one review speaks well of a topic (counts from sentiment_stats)."""
+    return {"range": {f"sentiment_stats.sentiment_by_topic.{topic}.positive": {"gte": 1}}}
+
+
+def _exists(*fields: str) -> list[dict]:
+    return [{"exists": {"field": f}} for f in fields]
+
+
+# Each need becomes OpenSearch clauses, the same way GreatSchools maps needs to query
+# parameters today. A clause is (query, weight). These only decide which schools come
+# back and in what order; the status shown to parents still comes from needs.verify().
+BOOSTS: dict[str, Callable[[Any], list[tuple[dict, float]]]] = {
+    "grade_level": lambda v: [({"terms": {"level_codes": list(v)}}, 2.0)] if v else [],
+    "school_type": lambda v: [({"terms": {"entity_type": list(v)}}, 2.0)] if v else [],
+    "high_performing": lambda v: [({"range": {"summary_rating": {"gte": 8}}}, 2.0),
+                                  ({"range": {"avg_review_rating": {"gte": 4}}}, 1.0)],
+    "stem": lambda v: [({"term": {"osp.school_sub_type": "STEM"}}, 2.0),
+                       ({"terms": {"osp.student_clubs": ["science_club", "math_club"]}}, 1.0),
+                       (_reviews_positive("STEM / Coding"), 0.5)],
+    "after_school_care": lambda v: [({"range": {"after_care_end_time": {"gte": v}}} if v
+                                     else {"exists": {"field": "after_care_end_time"}}, 2.0)],
+    "transportation": lambda v: [({"term": {"osp.transportation": "busses"}}, 2.0)],
+    "small_classes": lambda v: [({"terms": {"class_size.tier": ["very_small", "small"]}}, 2.0),
+                                ({"range": {"student_teacher_ratio": {"lte": 15}}}, 1.0)],
+    "gifted": lambda v: [({"term": {"gifted_talented": True}}, 2.0)],
+    "special_ed": lambda v: [({"range": {"swd_test_scores_rating": {"gte": 7}}}, 1.5),
+                             (_reviews_positive("Special Ed / IEP"), 1.0)],
+    "ell_support": lambda v: [({"terms": {"ell.tier": ["high", "above_average"]}}, 2.0),
+                              ({"terms": {"osp.foreign_language": ["spanish"]}}, 0.5)],
+    "safety": lambda v: [(_reviews_positive("Bullying / Safety"), 1.0),
+                         ({"terms": {"osp.mental_health": ["anti_bullying"]}}, 0.5)],
+    "attendance": lambda v: [({"term": {"high_attendance.tier": "good"}}, 2.0)],
+    "arts": lambda v: [(q, 1.0) for q in _exists("osp.arts_visual", "osp.arts_music", "osp.arts_performing_written")],
+    "sports": lambda v: [(q, 1.0) for q in _exists("osp.boys_sports", "osp.girls_sports")],
+    "college_prep": lambda v: [({"exists": {"field": "ap_courses"}}, 1.5),
+                               ({"range": {"college_readiness_rating": {"gte": 7}}}, 1.5)],
+    "cost": lambda v: [({"terms": {"entity_type": ["public", "charter"]}}, 2.0)]
+                      + ([({"range": {"tuition": {"lte": v}}}, 2.0)] if v else []),
+}
+
+
 def _filters(needs: list[dict]) -> tuple[list[dict], dict]:
-    """Hard filters for required grade, type and location. Returns (filters, notes)."""
+    """Hard filters for required grade, type, location and ratings. Returns (filters, notes)."""
     filters, notes = [], {}
     for need in needs:
         if need.get("mode") != "require":
@@ -64,6 +112,12 @@ def _filters(needs: list[dict]) -> tuple[list[dict], dict]:
             filters.append({"terms": {"level_codes": list(value)}})
         elif need["need"] == "school_type" and value:
             filters.append({"terms": {"entity_type": list(value)}})
+        elif need["need"] == "high_performing":
+            # GreatSchools' "high performing" need is a hard filter on rating 8-10. We also keep
+            # schools with no rating, so the parent sees "we don't know" instead of losing them.
+            filters.append({"bool": {"should": [{"range": {"summary_rating": {"gte": 8}}},
+                                                {"bool": {"must_not": {"exists": {"field": "summary_rating"}}}}],
+                                     "minimum_should_match": 1}})
         elif need["need"] == "location" and value:
             center = resolve_location(value)
             if center is None:
@@ -76,27 +130,48 @@ def _filters(needs: list[dict]) -> tuple[list[dict], dict]:
     return filters, notes
 
 
+def build_query(needs: list[dict], filters: list[dict], vector: list[float] | None = None) -> dict:
+    """One scored query: filters, a boost per need, and optional semantic similarity.
+
+    require and prefer boosts raise a school's score; avoid boosts lower it.
+    """
+    positive, negative = [], []
+    for need in needs:
+        weight = MODE_BOOST.get(need.get("mode", "prefer"), 1.0)
+        clauses = [{"constant_score": {"filter": q, "boost": w * weight}}
+                   for q, w in BOOSTS[need["need"]](need.get("value"))]
+        (negative if need.get("mode") == "avoid" else positive).extend(clauses)
+    if vector is not None:
+        positive.append({"knn": {"profile_vector": {"vector": vector, "k": CANDIDATES,
+                                                    "filter": {"bool": {"filter": filters}},
+                                                    "boost": SEMANTIC_BOOST}}})
+    query: dict = {"bool": {"filter": filters, "should": positive}}
+    if negative:
+        query = {"boosting": {"positive": query, "negative": {"bool": {"should": negative}}, "negative_boost": 0.5}}
+    return query
+
+
 def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) -> dict:
     """Search, verify every need for every candidate, and rank. Pure code apart from the embedding."""
     needs = [n for n in needs if n.get("need") in N.RULES]
+    for n in needs:  # in place, like the location center below, so chips show the mode we used
+        n["mode"] = N.normalize_mode(n)
     filters, notes = _filters(needs)
+    vector = embed(semantic_query) if semantic_query else None
 
-    if semantic_query:
-        query = {"knn": {"profile_vector": {"vector": embed(semantic_query), "k": 50,
-                                             "filter": {"bool": {"filter": filters}}}}}
-    else:
-        query = {"bool": {"filter": filters}}
     hits = client().search(index=SCHOOLS_INDEX, body={
-        "size": 50, "query": query, "_source": {"excludes": SOURCE_EXCLUDES},
+        "size": CANDIDATES, "query": build_query(needs, filters, vector),
+        "sort": ["_score", {"name.raw": "asc"}], "track_scores": True,
+        "_source": {"excludes": SOURCE_EXCLUDES},
     })["hits"]["hits"]
 
-    max_semantic = max((h["_score"] for h in hits), default=1.0) or 1.0
+    max_retrieval = max((h["_score"] or 0 for h in hits), default=0.0) or 1.0
     results = []
     for hit in hits:
         school = hit["_source"]
         criteria = [N.verify(school, n) for n in needs]
-        semantic = hit["_score"] / max_semantic if semantic_query else 0.0
-        final = 0.85 * N.score(criteria) + 0.15 * semantic if semantic_query else N.score(criteria)
+        # The verified criteria decide most of the rank; the search score breaks near-ties.
+        final = 0.85 * N.score(criteria) + 0.15 * ((hit["_score"] or 0) / max_retrieval)
         results.append({
             "school_id": hit["_id"],
             "name": school.get("name"),
