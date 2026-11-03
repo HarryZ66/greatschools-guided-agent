@@ -1,0 +1,180 @@
+{
+  "_about": "Plain-language explanations for parents (P4). Written for this demo from public sources, mainly GreatSchools' ratings guide at https://www.greatschools.org/gk/ratings/. Draft: GreatSchools should review and replace these with its own content before real use.",
+  "terms": [
+    {
+      "id": "summary_rating",
+      "title": "GreatSchools Summary Rating",
+      "aliases": ["summary rating", "greatschools rating", "rating", "school rating", "1-10", "score out of 10"],
+      "text": "A score from 1 to 10 that sums up how well a school serves its students. It combines smaller ratings, such as test scores, student progress, college readiness and equity. Roughly: 1-4 is below average, 5-6 is average and 7-10 is above average. Ratings compare schools within the same state, so a 7 in one state isn't the same as a 7 in another. Many private schools have no rating because they don't share state test results.",
+      "source": "https://www.greatschools.org/gk/ratings/"
+    },
+    {
+      "id": "test_scores_rating",
+      "title": "Test Score Rating",
+      "aliases": ["test scores", "test score rating", "state tests", "proficiency"],
+      "text": "Shows how students at the school did on state tests compared with other schools in the state. It tells you about achievement, but not how much students grew during the year.",
+      "source": "https://www.greatschools.org/gk/ratings/"
+    },
+    {
+      "id": "student_progress_rating",
+      "title": "Student Progress Rating",
+      "aliases": ["student progress", "academic progress", "growth", "growth rating"],
+      "text": "Shows how much students improved from one year to the next, compared with similar students elsewhere in the state. A school can have average test scores but strong progress, which means it is helping kids move forward.",
+      "source": "https://www.greatschools.org/gk/ratings/"
+    },
+    {
+      "id": "college_readiness_rating",
+      "title": "College Readiness Rating",
+      "aliases": ["college readiness", "college ready", "graduation rate"],
+      "text": "For high schools. Looks at things like graduation rates, college entrance exams and advanced classes to show how well a school prepares students for college.",
+      "source": "https://www.greatschools.org/gk/ratings/"
+    },
+    {
+      "id": "equity_rating",
+      "title": "Equity Rating",
+      "aliases": ["equity", "equity rating", "low income rating", "achievement gap"],
+      "text": "Shows how well a school serves students from low-income families and from different racial and ethnic groups, compared with other students. A high equity rating means those students do well at this school too.",
+      "source": "https://www.greatschools.org/gk/ratings/"
+    },
+    {
+      "id": "community_rating",
+      "title": "Community rating (stars)",
+      "aliases": ["stars", "community rating", "reviews", "parent reviews", "review rating"],
+      "text": "The average star rating (1 to 5) from reviews written by parents, students and staff. It reflects people's experiences, not test data, and older reviews may not describe the school today.",
+      "source": "https://www.greatschools.org/"
+    },
+    {
+      "id": "public_school",
+      "title": "Public school",
+      "aliases": ["public", "district school", "traditional public school", "neighborhood school"],
+      "text": "A free school paid for with tax money and run by the local school district. Most children are assigned a public school based on their home address.",
+      "source": "general"
+    },
+    {
+      "id": "charter_school",
+      "title": "Charter school",
+      "aliases": ["charter", "charter schools"],
+      "text": "A free public school that is run independently from the school district, under a contract (a 'charter') with the state or district. Anyone can apply. If more families apply than there are seats, there is usually a lottery.",
+      "source": "general"
+    },
+    {
+      "id": "magnet_school",
+      "title": "Magnet school",
+      "aliases": ["magnet", "magnet program"],
+      "text": "A free public school or program with a special focus, such as STEM, the arts or languages. It can draw students from across the district, and some have an application or lottery.",
+      "source": "general"
+    },
+    {
+      "id": "private_school",
+      "title": "Private school",
+      "aliases": ["private", "independent school", "parochial", "religious school"],
+      "text": "A school that charges tuition and is not run by the government. Private schools set their own admissions and curriculum. Scholarships or state programs may help pay tuition in some states.",
+      "source": "general"
+    },
+    {
+      "id": "microschool",
+      "title": "Microschool",
+      "aliases": ["micro school", "micro-school", "pod", "learning pod"],
+      "text": "A very small school, often with a few dozen students or fewer in mixed-age groups. Microschools may meet in homes or community spaces and are usually private or part of homeschooling. Rules and oversight vary by state.",
+      "source": "general"
+    },
+    {
+      "id": "cte",
+      "title": "CTE (Career and Technical Education)",
+      "aliases": ["cte", "career and technical education", "career tech", "vocational", "career pathways", "trade school"],
+      "text": "Classes that teach job skills alongside regular school subjects, like health care, building trades, computer science or culinary arts. Students can sometimes earn certificates or college credit before they graduate.",
+      "source": "general"
+    },
+    {
+      "id": "stem",
+      "title": "STEM",
+      "aliases": ["stem", "steam", "science technology engineering math"],
+      "text": "Science, Technology, Engineering and Math. A STEM school or program puts extra focus on these subjects, often with hands-on projects, robotics or coding. STEAM adds the Arts.",
+      "source": "general"
+    },
+    {
+      "id": "iep",
+      "title": "IEP (Individualized Education Program)",
+      "aliases": ["iep", "individualized education program", "special education", "special ed", "sped"],
+      "text": "A written plan for a child with a disability who needs special education. Public schools must make the plan with the family and follow it. It lists the child's goals and the support, services and changes the school will provide.",
+      "source": "general"
+    },
+    {
+      "id": "504_plan",
+      "title": "504 plan",
+      "aliases": ["504", "504 plan", "section 504", "accommodations"],
+      "text": "A plan that gives a student with a disability changes in how they learn, such as extra test time or a seat near the teacher, so they can take part in regular classes. It's for students who don't need special education services but do need support.",
+      "source": "general"
+    },
+    {
+      "id": "ell",
+      "title": "English learners (ELL / ESL)",
+      "aliases": ["ell", "esl", "english learner", "english learners", "esol", "bilingual", "dual language"],
+      "text": "Students who are still learning English. Schools must help them learn English and keep up in other subjects. Some schools also offer dual-language programs, where classes are taught in two languages.",
+      "source": "general"
+    },
+    {
+      "id": "gifted_talented",
+      "title": "Gifted and talented",
+      "aliases": ["gifted", "gifted and talented", "gt", "gate", "advanced learners"],
+      "text": "Programs for students who learn faster or need more challenge than the regular class gives them. How students qualify, often by testing or teacher referral, depends on the district.",
+      "source": "general"
+    },
+    {
+      "id": "ap_courses",
+      "title": "AP and IB courses",
+      "aliases": ["ap", "advanced placement", "ap classes", "ib", "international baccalaureate", "dual enrollment"],
+      "text": "College-level classes taken in high school. With a good score on the final exam, students can earn college credit. Dual enrollment means taking real college classes while still in high school.",
+      "source": "general"
+    },
+    {
+      "id": "student_teacher_ratio",
+      "title": "Student-teacher ratio",
+      "aliases": ["student teacher ratio", "class size", "students per teacher"],
+      "text": "The number of students for each teacher at the school. A lower number usually means more attention for each child, but it isn't exactly the same as class size.",
+      "source": "general"
+    },
+    {
+      "id": "chronic_absenteeism",
+      "title": "Attendance and chronic absence",
+      "aliases": ["attendance", "chronic absenteeism", "absences", "absent"],
+      "text": "Chronic absence usually means a student missed 10% or more of the school year, about 18 days. Schools with many chronically absent students may have problems worth asking about.",
+      "source": "general"
+    },
+    {
+      "id": "esa",
+      "title": "Education Savings Account (ESA)",
+      "aliases": ["esa", "education savings account", "empowerment scholarship"],
+      "text": "A state program that puts public money into an account parents control. They can spend it on approved costs like private school tuition, tutoring, therapy or learning materials. Who qualifies and how much you get depend on your state.",
+      "source": "general"
+    },
+    {
+      "id": "voucher",
+      "title": "School voucher",
+      "aliases": ["voucher", "vouchers", "opportunity scholarship"],
+      "text": "A state program that uses public money to pay some or all of a child's private school tuition. Rules about who qualifies depend on your state.",
+      "source": "general"
+    },
+    {
+      "id": "tax_credit_scholarship",
+      "title": "Tax-credit scholarship",
+      "aliases": ["tax credit scholarship", "tax credit", "scholarship", "scholarships"],
+      "text": "People or businesses donate to a nonprofit scholarship group and get a tax credit in return. The group gives scholarships that help families pay private school costs. A federal program starting in 2027 adds more of these; what's offered depends on your state.",
+      "source": "general"
+    },
+    {
+      "id": "open_enrollment",
+      "title": "Open enrollment / school choice",
+      "aliases": ["open enrollment", "school choice", "transfer", "out of zone", "inter-district"],
+      "text": "Rules that let families apply to a public school other than the one assigned by their address. Seats, deadlines and transportation vary by district, so check early.",
+      "source": "general"
+    },
+    {
+      "id": "result_statuses",
+      "title": "What the checks on each school mean",
+      "aliases": ["confirmed", "partial", "needs attention", "missing", "checkmark", "what do the icons mean", "status"],
+      "text": "Confirmed: the data shows the school meets this need, and the data is recent. Partial: it meets the need only partly, only reviews support it, or the data is old. Needs attention: the data says the school doesn't meet it, or something in the data looks wrong. Missing: we have no data, so ask the school.",
+      "source": "this app"
+    }
+  ]
+}
