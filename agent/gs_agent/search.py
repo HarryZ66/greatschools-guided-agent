@@ -139,6 +139,30 @@ def summarize(needs: list[dict], results: list[dict]) -> dict:
     return summary
 
 
+GENERIC_NAME_WORDS = {"school", "schools", "academy", "elementary", "middle", "high", "charter", "preparatory",
+                      "prep", "center", "k-8", "k8", "day", "christian", "montessori", "the", "of"}
+
+
+def find_by_name(name: str, size: int = 3) -> list[dict]:
+    """Schools whose name matches what the parent typed, tolerating typos and partial names.
+
+    Loose matching uses only the distinctive words, so "Hogwarts Academy" doesn't match
+    every school with "Academy" in its name.
+    """
+    core = " ".join(w for w in name.split() if w.lower().strip(".,") not in GENERIC_NAME_WORDS)
+    if not core:
+        return []
+    hits = client().search(index=SCHOOLS_INDEX, body={
+        "size": size,
+        "_source": ["name", "city", "entity_type", "level_codes"],
+        "query": {"bool": {
+            "must": [{"match": {"name": {"query": core, "fuzziness": "AUTO", "operator": "and"}}}],
+            "should": [{"match_phrase": {"name": {"query": name, "boost": 3}}}],
+        }},
+    })["hits"]["hits"]
+    return [{"school_id": h["_id"], **h["_source"], "match_score": round(h["_score"], 2)} for h in hits]
+
+
 def get_school(school_id: str) -> dict | None:
     try:
         doc = client().get(index=SCHOOLS_INDEX, id=school_id, _source_excludes=["profile_vector"])

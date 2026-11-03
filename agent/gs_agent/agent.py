@@ -31,6 +31,8 @@ class ChipLabel(BaseModel):
     label: str = Field(description="Short plain-language chip text, e.g. 'Care until 6pm'")
     source: Literal["stated", "inferred", "answered"] = Field(
         description="stated: parent said it; inferred: you assumed it; answered: from your question")
+    mode: Mode = Field(default="prefer", description="require, prefer or avoid")
+    value: Any = Field(default=None, description="Value in the catalog's format, if the need has one")
 
 
 class Option(BaseModel):
@@ -50,9 +52,10 @@ class Callout(BaseModel):
 
 
 class Decision(BaseModel):
-    chips: list[ChipLabel] = Field(description="One entry per need you searched with")
+    chips: list[ChipLabel] = Field(description="Every need you know so far, searched or not")
     question: Question | None = Field(default=None, description="At most one question, or null")
-    message: str = Field(description="1-3 plain sentences for the parent. No jargon. Don't restate the cards.")
+    message: str = Field(description="1-3 plain sentences for the parent. No jargon. Don't restate the cards. "
+                                     "If you ask a question, don't repeat it here.")
     callouts: list[Callout] = Field(default_factory=list, description="0-2 honest notes about the data")
 
 
@@ -63,19 +66,31 @@ How you work:
 1. Turn what the parent says into needs from the catalog below, each with a mode:
    require (must have), prefer (nice to have) or avoid. grade_level and location are always required.
    Infer needs from plain words ("my 6th grader" -> grade_level ["m"]; "I work until 6" -> after_school_care "18:00").
-2. If grade level or location is unknown, don't search: ask for it.
+2. If grade level or location is unknown, don't search: ask for it, and still return chips for the
+   needs you already know.
 3. Otherwise call find_schools with ALL current needs (it replaces the previous search). Pass a short
    semantic_query describing the softer wishes in the parent's words.
 4. Read the summary counts. Ask ONE question only if the answer would change the ranking, for example:
    a required need is missing for most schools, needs conflict, or a partial match needs a trade-off
    ("Care at the top schools ends at 5pm. Is that workable?"). Otherwise ask nothing.
-5. Use get_school_profile when the parent asks about one school.
+5. When the parent asks about one school, use get_school_profile with its school_id. If the school
+   isn't in your latest results, first call find_school_by_name, then get_school_profile. If several
+   schools match, say which one you checked. If none match, say the school isn't in our data.
 
 Honesty rules:
 - Never claim a school meets a need unless find_schools says confirmed. Never invent facts, numbers or quotes.
 - When data is missing or old, say so plainly and suggest asking the school.
 - Don't list the schools in your message; the app shows cards built from the tool results.
 - Write at a 6th-grade reading level. Answer in the parent's language.
+
+Fairness rule (fair housing):
+- Never filter, rank or recommend schools or neighborhoods by the race, ethnicity, national origin,
+  religion, disability or income of the students or residents, even if asked, and even if the data
+  had it. Don't point the parent to other sources for that either.
+- Say so in one kind sentence, without lecturing, then offer to search by what their child needs
+  (programs, safety reviews, class size, ratings, support for English learners or special needs).
+- Subgroup ratings (e.g. how a school does for low-income or English-learner students) may be
+  shared when a parent asks how well a school serves a group their own child belongs to.
 
 Need catalog (id: value format):
 {catalog}
@@ -98,6 +113,8 @@ class GuidedSession:
         self.pending_question: dict | None = None
         self.comparison: dict | None = None
         self.chip_labels: dict[str, ChipLabel] = {}  # the agent's wording, kept across chip edits
+        self.seen_ids: set[str] = set()  # every school a tool returned; evals check the model stays inside it
+        self.usage = {"inputTokens": 0, "outputTokens": 0, "model_calls": 0}
         self.agent = self._new_agent()
 
     def _new_agent(self, messages: list | None = None) -> Agent:
@@ -129,6 +146,7 @@ class GuidedSession:
             # find() adds the resolved location center to the needs; keep it for compare and edits
             session.last = search.find(clean, session.semantic_query)
             session.needs = clean
+            session.seen_ids.update(r["school_id"] for r in session.last["results"])
             return json.dumps(_compact(session.last))
 
         @tool
@@ -141,11 +159,26 @@ class GuidedSession:
             school = search.get_school(school_id)
             if school is None:
                 return json.dumps({"error": f"No school with id {school_id}"})
-            criteria = [N.verify(school, n) for n in copy.deepcopy(session.needs)]
+            session.seen_ids.add(school_id)
+            criteria =[N.verify(school, n) for n in copy.deepcopy(session.needs)]
             keep = {k: v for k, v in school.items() if k not in ("reviews_full", "reviews_text", "profile_text")}
             return json.dumps({"school": keep, "criteria": criteria, "quality_flags": N.quality_flags(school)})[:12000]
 
-        return [find_schools, get_school_profile]
+        @tool
+        def find_school_by_name(name: str) -> str:
+            """Look up schools by name, for when the parent names a school that may not be in the results.
+
+            Args:
+                name: The school name as the parent wrote it, e.g. "Lanternfish K-8".
+            """
+            matches = search.find_by_name(name)
+            session.seen_ids.update(m["school_id"] for m in matches)
+            if not matches:
+                return json.dumps({"matches": [], "note": f"No school named like '{name}' in our data."})
+            return json.dumps({"matches": matches,
+                               "next": "Call get_school_profile with the best match's school_id."})
+
+        return [find_schools, get_school_profile, find_school_by_name]
 
     # ---------------------------------------------------------------- turns
 
@@ -183,6 +216,10 @@ class GuidedSession:
                      f"{json.dumps(self._needs_for_prompt())}.)")
             self.agent = self._new_agent()
             result = self.agent(f"{recap}\n\n{text}", structured_output_model=Decision)
+        used = result.metrics.accumulated_usage
+        self.usage["inputTokens"] += used.get("inputTokens", 0)
+        self.usage["outputTokens"] += used.get("outputTokens", 0)
+        self.usage["model_calls"] += result.metrics.cycle_count
         decision: Decision = result.structured_output
         return self._blocks(decision)
 
@@ -245,6 +282,11 @@ class GuidedSession:
         blocks: list[dict[str, Any]] = []
         self.chip_labels.update({c.need: c for c in (decision.chips if decision else [])})
         labels = self.chip_labels
+        if decision and not self.needs:
+            # No search yet (e.g. the agent asked for a location first): still show what it
+            # understood, and keep it so the next search starts from these needs.
+            self.needs = [{"need": c.need, "mode": c.mode, "value": c.value}
+                          for c in decision.chips if c.need in N.RULES]
         chips = []
         for n in self.needs:
             c = labels.get(n["need"])

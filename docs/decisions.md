@@ -36,6 +36,15 @@ Editing a chip, saving, thumbs and metrics never call the model. A chip edit re-
 and verification in about a second. Comparison tables are built by the same verify rules as
 the cards; the model only writes the one-line summary.
 
+## 007: Fairness rule in the agent
+
+The agent never filters, ranks or recommends schools or neighborhoods by the race, ethnicity,
+national origin, religion, disability or income of students or residents, and doesn't point
+parents elsewhere for it. Steering families by demographics is a fair-housing risk. It declines
+in one sentence and offers to search by what the child needs. Subgroup ratings can still be
+shared when a parent asks how a school serves a group their own child belongs to. The
+`fairness` cases in `evals/cases.json` check this.
+
 ## 004: Models
 
 - Main agent: Claude Sonnet 5.5 on Bedrock (`us.anthropic.claude-sonnet-5-5`)

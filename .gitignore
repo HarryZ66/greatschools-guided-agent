@@ -33,3 +33,6 @@ data/raw/
 
 # Account-specific deploy outputs
 infra/cdk-outputs*.json
+
+# Per-run eval output (latest.md is kept)
+evals/results/*.json

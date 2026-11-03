@@ -95,6 +95,31 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvi
 
 Try it from the command line without the API: `PYTHONPATH=. ../.venv/bin/python scripts/try_agent.py "middle school near Miami with STEM, I work until 6"`
 
+## Evaluation
+
+`evals/cases.json` holds 19 parent queries across core searches, missing information, honesty,
+different family needs, fairness and edge cases. `evals/run_evals.py` runs them and checks needs
+extraction, questions, refusals, and that every school the agent names was returned by a tool.
+
+```bash
+AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 .venv/bin/python evals/run_evals.py
+```
+
+Latest run on Claude Sonnet 5.5 (full table in [`evals/results/latest.md`](evals/results/latest.md)):
+
+| Metric | Result |
+|---|---|
+| Cases passed | 19 / 19 |
+| Needs extracted correctly | 14 / 14 |
+| Made-up school mentions | 0 |
+| Errors | 0 |
+| Latency per turn | median 7.1 s, max 15.3 s |
+| Tokens per turn | ~9,100 |
+| Estimated cost per turn | ~$0.037 (assuming $3 / $15 per million input / output tokens) |
+
+Load test against the deployed URL: 8 parents searching at the same moment all got answers
+(median 7.7 s, max 12.2 s).
+
 ## Decisions
 
 See [`docs/decisions.md`](docs/decisions.md).
