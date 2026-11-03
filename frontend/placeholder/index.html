@@ -79,6 +79,13 @@ function render(blocks) {
         <div class="meta">${esc(r.entity_type)} · ${esc(r.city)} · match ${(r.score * 100).toFixed(0)}%</div>
         <div class="crit">${r.criteria.map(c => `<span>${ICON[c.status]}</span><span class="${c.status}">${esc(c.need.replace(/_/g, " "))}${c.note ? ": " + esc(c.note) : ""}</span>`).join("")}</div>
         ${r.watch_out ? `<div class="watch">Watch out: ${esc(r.watch_out)}</div>` : ""}</div>`).join("");
+    } else if (b.type === "program_results") {
+      el.innerHTML = `<div class="meta" style="margin:12px 0 4px">Programs nearby (run by libraries and community centers)</div>` +
+        b.programs.map(p => `<div class="box card"><h3>${esc(p.name)}</h3>
+        <div class="meta">${esc(p.organization)} · ${esc(p.city)} · ${p.distance_km} km from ${esc(p.near)} · ${esc(p.ages)} · ${esc(p.cost)}${p.registration_open ? " · registration open" : ""}</div>
+        <div class="crit"><span>📅</span><span>Meets ${esc((p.meets_on || []).join(", "))}. Next: ${p.next_sessions.map(s => `${esc(s.day)} ${esc(s.date.slice(5))} ${esc(s.start)}–${esc(s.end)}`).join(", ")}</span>
+        ${p.time_fit ? `<span>${ICON[p.time_fit.status]}</span><span class="${p.time_fit.status}">${esc(p.time_fit.note)}</span>` : ""}</div>
+        ${p.quality_flags.length ? `<div class="watch">Watch out: ${p.quality_flags.map(f => esc(f.note)).join(" ")}</div>` : ""}</div>`).join("");
     } else if (b.type === "comparison") {
       el.className = "box"; el.textContent = b.summary || "";
     }

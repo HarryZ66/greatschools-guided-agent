@@ -158,11 +158,17 @@ def question_hints(needs: list[dict], results: list[dict]) -> tuple[list[str], s
             candidates.append((partial[0] in valued, confirmed, -r["rank"], r, by_need[partial[0]]))
     candidates.sort(key=lambda t: t[:3], reverse=True)
     hinted_ids = set()
+    wanted = {n["need"]: n.get("value") for n in needs}
     for _, _, _, r, c in candidates[:2]:
         hinted_ids.add(r["school_id"])
-        hints.append(f"Trade-off: {r['name']} meets every other must-have, but "
-                     f"{N.CATALOG[c['need']]['label']} is only partial: {(c['note'] or '').rstrip('.')}. "
-                     "Ask if that is workable.")
+        hint = (f"Trade-off: {r['name']} meets every other must-have, but "
+                f"{N.CATALOG[c['need']]['label']} is only partial: {(c['note'] or '').rstrip('.')}. "
+                "Ask if that is workable.")
+        ends = next((e["value"] for e in c["evidence"] if e["field"] == "after_care_end_time"), None)
+        if c["need"] == "after_school_care" and ends and wanted.get("after_school_care"):
+            hint += (f" Also call search_programs with near_school_id='{r['school_id']}', time_from='{ends}', "
+                     f"time_to='{wanted['after_school_care']}' to look for a nearby program that covers the gap.")
+        hints.append(hint)
     for need in required:
         if results and not any(c["need"] == need and c["status"] == N.CONFIRMED for r in results for c in r["criteria"]):
             hints.append(f"No result confirms the must-have '{N.CATALOG[need]['label']}'. Ask if it is a must, "

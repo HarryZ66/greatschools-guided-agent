@@ -181,6 +181,28 @@ Streamed while the agent works (the "I checked this for you" trace).
 }
 ```
 
+### `program_results`
+
+Library and community programs, sent on the turn the agent searched for them. Fit and flags
+come from code; programs with only past sessions are never listed (they are named in
+`excluded_past`). `meets_on` lists every weekday with an upcoming session.
+
+```json
+{
+  "type": "program_results",
+  "programs": [{
+    "program_id": "fl-912345", "name": "After-School Robotics Club",
+    "organization": "Coral Lantern Branch Library", "city": "Miami",
+    "distance_km": 1.0, "near": "Tamarind Cove STEM Academy", "meets_on": ["Mon", "Tue", "Wed", "Thu"],
+    "next_sessions": [{"date": "2026-11-03", "day": "Tue", "start": "17:00", "end": "18:30"}],
+    "ages": "Ages 10-14", "cost": "Free", "registration_open": true,
+    "time_fit": {"status": "confirmed", "note": "Runs 17:00-18:30, covering 17:00-18:00."},
+    "quality_flags": [], "tags": ["Robotics", "STEM"], "url": "https://www.example.org/…"
+  }],
+  "excluded_past": [{"name": "Summer Robotics Camp", "organization": "Biscayne Reach Library", "city": "Miami"}]
+}
+```
+
 ### `evidence_callout`
 
 ```json

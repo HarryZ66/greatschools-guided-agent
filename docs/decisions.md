@@ -62,6 +62,15 @@ match, preferring concrete gaps in time or price, and passes these as `question_
 agent asks about the most important one; a hinted school outside the top cards is added as a
 card so the parent can see it.
 
+## 010: Programs fill the gaps schools leave
+
+Programs are searched near a school or a city, and code decides fit: whether the sessions
+cover a time gap, distance from the school, ages and cost. Programs with only past sessions are
+never listed, and ZIP codes that don't match the state are flagged. When a school's care ends
+before the parent needs it, the trade-off hint tells the agent to look for programs near that
+school covering the gap, then still let the parent choose. The sample programs were all in
+other states, so we generated Miami-area programs in the same format.
+
 ## 004: Models
 
 - Main agent: Claude Sonnet 5.5 on Bedrock (`us.anthropic.claude-sonnet-5-5`)

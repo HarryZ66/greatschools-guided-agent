@@ -18,6 +18,7 @@ from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models import BedrockModel
 
 from . import needs as N
+from . import programs as P
 from . import search
 from .config import MAIN_MODEL, REGION
 
@@ -77,10 +78,18 @@ How you work:
    the most important hint, naming the school and the trade-off, e.g. "Tamarind Cove has the STEM
    program you want, but care ends at 5pm. Could someone pick him up at 5, or do you need 6?".
    Otherwise ask only if the answer would clearly change the ranking (e.g. cost: free vs private).
+   If a program you found could cover the gap, still ask: name the school and the program, and let
+   the parent choose (e.g. "Tamarind Cove's care ends at 5pm. Would the library robotics club from
+   5 to 6:30 work, or do you need care at the school until 6?"). Only the parent can decide that.
 5. When the parent asks about one school, use get_school_profile with its school_id. If the school
    isn't in your latest results, first call find_school_by_name, then get_school_profile. If several
    schools match, say which one you checked. If none match, say the school isn't in our data.
-6. When the parent asks what a term means, how ratings work, how school choice works, or what the
+6. Use search_programs when the parent wants clubs, tutoring, classes or help outside school hours,
+   or when a good school leaves a time gap (a question_hint will say so): search near that school
+   with time_from/time_to set to the gap. Mention only programs the tool returned, say they're run by
+   a library or community center (not the school), and note if registration is needed. Programs with
+   only past sessions are excluded; say so if the parent asks about one.
+7. When the parent asks what a term means, how ratings work, how school choice works, or what the
    app's labels mean, call lookup_content and explain using only what it returns, in plain words,
    and list the entry ids in sources. If it returns nothing, say you don't have a guide entry for
    that yet and suggest asking the school or district; don't explain it from memory.
@@ -123,6 +132,9 @@ class GuidedSession:
         self.chip_labels: dict[str, ChipLabel] = {}  # the agent's wording, kept across chip edits
         self.seen_ids: set[str] = set()  # every school a tool returned; evals check the model stays inside it
         self.seen_content: dict[str, str] = {}  # guide entry id -> title, for sources the model may cite
+        self.last_programs: dict | None = None
+        self.programs_fresh = False  # show program cards only on the turn they were searched
+        self.seen_programs: set[str] = set()
         self.usage = {"inputTokens": 0, "outputTokens": 0, "model_calls": 0}
         self.agent = self._new_agent()
 
@@ -201,7 +213,31 @@ class GuidedSession:
                 return json.dumps({"entries": [], "note": "No guide entry covers this."})
             return json.dumps({"entries": [{k: e[k] for k in ("id", "title", "body", "source")} for e in entries]})
 
-        return [find_schools, get_school_profile, find_school_by_name, lookup_content]
+        @tool
+        def search_programs(interest: str, city: str = "", near_school_id: str = "", grades: list[str] | None = None,
+                            time_from: str = "", time_to: str = "") -> str:
+            """Find library and community programs (clubs, tutoring, after-school help, classes) with
+            upcoming sessions, near a city or near one school.
+
+            Args:
+                interest: What the parent wants, e.g. "robotics club" or "after-school homework help".
+                city: City to search around, if not searching near a school.
+                near_school_id: A school_id from find_schools, to look within about 8 km of that school.
+                grades: Level codes to match, e.g. ["m"].
+                time_from: Start of a time gap to cover, "HH:MM" 24h (e.g. care ends "17:00").
+                time_to: End of the gap, "HH:MM" (e.g. parent needs "18:00").
+            """
+            found = P.find_programs(interest, city, near_school_id, grades, time_from, time_to)
+            session.last_programs, session.programs_fresh = found, True
+            session.seen_programs.update(p["program_id"] for p in found["programs"])
+            return json.dumps({
+                "programs": [{k: p[k] for k in ("program_id", "name", "organization", "city", "distance_km", "near",
+                                                "meets_on", "next_sessions", "ages", "cost", "registration_open", "time_fit",
+                                                "quality_flags")} for p in found["programs"]],
+                "excluded_past": found["excluded_past"], "notes": found["notes"],
+            })
+
+        return [find_schools, get_school_profile, find_school_by_name, lookup_content, search_programs]
 
     # ---------------------------------------------------------------- turns
 
@@ -351,6 +387,11 @@ class GuidedSession:
             evidence += [{"field": f["field"], "value": f["value"]} for f in r["quality_flags"]]
             blocks.append({"type": "evidence_callout", "school_id": r["school_id"], "text": callout.text,
                            "evidence": evidence})
+
+        if self.programs_fresh and self.last_programs and self.last_programs["programs"]:
+            blocks.append({"type": "program_results", "programs": self.last_programs["programs"],
+                           "excluded_past": self.last_programs["excluded_past"]})
+        self.programs_fresh = False
 
         if results:
             blocks.append({"type": "school_results", "results": [

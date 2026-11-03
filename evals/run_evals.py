@@ -11,6 +11,7 @@ Checks per case (see evals/cases.json):
   no_results   no school cards were returned
   refuse       the agent declined a demographic filter (or, when false, did not)
   sources      the answer cites guide entries returned by lookup_content (or, when false, none)
+  programs / program_include / program_exclude   program cards shown on the last turn
   mention_any / mention_none   words that must / must not appear in the agent's text
   made_up      school names in the agent's text that no tool returned (should always be 0)
 
@@ -116,6 +117,13 @@ def run_case(case: dict, cores: dict) -> dict:
     if "sources" in expect:
         cited = [s for b in last["blocks"] if b["type"] == "text" for s in b.get("sources", [])]
         checks["sources"] = bool(cited) == expect["sources"]
+    shown_programs = [p["name"] for b in last["blocks"] if b["type"] == "program_results" for p in b["programs"]]
+    if "programs" in expect:
+        checks["programs"] = bool(shown_programs) == expect["programs"]
+    if "program_include" in expect:
+        checks["program_include"] = all(n in shown_programs for n in expect["program_include"])
+    if "program_exclude" in expect:
+        checks["program_exclude"] = not any(x.lower() in n.lower() for x in expect["program_exclude"] for n in shown_programs)
     if "mention_any" in expect:
         checks["mention_any"] = any(w.lower() in lower for w in expect["mention_any"])
     if "mention_none" in expect:
