@@ -1,0 +1,35 @@
+# Secrets and local config: never commit
+.env
+.env.*
+!.env.example
+*.pem
+.aws/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# CDK
+infra/cdk.out/
+cdk.context.json
+
+# Data provided by GreatSchools for the hackathon (confirm before publishing)
+data/raw/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Account-specific deploy outputs
+infra/cdk-outputs.json
