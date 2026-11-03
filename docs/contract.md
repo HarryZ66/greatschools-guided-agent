@@ -90,10 +90,19 @@ Event types:
 | `compare` | `school_ids` (2) | Yes |
 | `chip_edit` | `need`, `mode` (require/prefer/avoid) or `removed: true` | No: code re-runs search and verify |
 
+Omit `session_id` on the first turn; every response returns the `session_id` to send next time.
+
 Saving and feedback skip the agent entirely:
 
-- `POST /api/saved`: `{session_id, school_id}`; `DELETE /api/saved/{school_id}`
+- `POST /api/saved`: `{session_id, school_id}` → `{saved: [...]}`
+- `GET /api/saved?session_id=…` → `{saved: [{school_id, name, at}]}`
+- `DELETE /api/saved/{school_id}?session_id=…` → `{saved: [...]}`
 - `POST /api/feedback`: `{session_id, school_id, vote: "up" | "down"}`
+- `GET /api/schools/{school_id}`: full school record (profile view)
+- `GET /api/metrics`: `{searches, saves, saves_to_searches, thumbs_up, thumbs_down, relevance, criteria_per_search}`
+
+A `compare` turn returns `criteria_chips` and a `comparison` block (no `school_results`);
+the comparison's `summary` is the agent's one-line take.
 
 ## 4. Response: UI blocks
 

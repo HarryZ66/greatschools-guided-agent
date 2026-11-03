@@ -49,6 +49,36 @@ To tear everything down:
 cdk destroy --all
 ```
 
+## Load data
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r agent/requirements.txt
+.venv/bin/python data/generate.py --count 80            # synthetic Miami-area schools
+AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 \
+  .venv/bin/python data/ingest.py data/generated/schools_generated.json --recreate
+```
+
+All generated schools are fictional. Records carry `"synthetic_generated": true`.
+
+## Run the agent API locally
+
+```bash
+cd agent
+AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvicorn gs_agent.api:app --port 8000 --reload
+```
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/turn` | Query, answer a question, compare two schools, or edit a chip (see `docs/contract.md`) |
+| `POST /api/saved`, `GET /api/saved?session_id=`, `DELETE /api/saved/{school_id}?session_id=` | Saved list |
+| `POST /api/feedback` | Thumbs up/down on a result |
+| `GET /api/schools/{school_id}` | Full school record for the profile view |
+| `GET /api/metrics` | Saves-to-searches, thumbs relevance, criteria per search |
+| `GET /api/health` | Health check |
+
+Try it from the command line without the API: `PYTHONPATH=. ../.venv/bin/python scripts/try_agent.py "middle school near Miami with STEM, I work until 6"`
+
 ## Decisions
 
 See [`docs/decisions.md`](docs/decisions.md).

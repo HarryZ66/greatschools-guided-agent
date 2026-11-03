@@ -94,6 +94,8 @@ class GuidedSession:
         self.last: dict | None = None
         self.saved: set[str] = set()
         self.pending_question: dict | None = None
+        self.comparison: dict | None = None
+        self.chip_labels: dict[str, ChipLabel] = {}  # the agent's wording, kept across chip edits
         self.agent = Agent(
             # Claude 5.x models on Bedrock reject `temperature`, so it's left at the default.
             model=BedrockModel(model_id=MAIN_MODEL, boto_session=boto3.Session(region_name=REGION),
@@ -115,10 +117,11 @@ class GuidedSession:
                 needs: All current needs, each {"need": <catalog id>, "mode": "require"|"prefer"|"avoid", "value": ...}.
                 semantic_query: Short description of softer wishes, in the parent's words.
             """
-            clean = [n for n in needs if isinstance(n, dict) and n.get("need") in N.RULES]
-            session.needs = copy.deepcopy(clean)
+            clean = copy.deepcopy([n for n in needs if isinstance(n, dict) and n.get("need") in N.RULES])
             session.semantic_query = semantic_query or None
-            session.last = search.find(copy.deepcopy(clean), session.semantic_query)
+            # find() adds the resolved location center to the needs; keep it for compare and edits
+            session.last = search.find(clean, session.semantic_query)
+            session.needs = clean
             return json.dumps(_compact(session.last))
 
         @tool
@@ -148,8 +151,14 @@ class GuidedSession:
             question = (self.pending_question or {}).get("text", "")
             return self._agent_turn(f'(Answer to your question "{question}"): {label}')
         if kind == "compare":
-            ids = event.get("school_ids", [])
-            return self._agent_turn(f"Compare these two schools for my needs: {', '.join(ids)}")
+            self.comparison = self._comparison(event.get("school_ids", [])[:2])
+            if self.comparison is None:
+                raise ValueError("Both school ids must exist")
+            names = " and ".join(self.comparison["names"])
+            return self._agent_turn(
+                f"Compare {names} for my needs. Here is the side-by-side check (already shown to me as a table): "
+                f"{json.dumps(self.comparison['rows'])}. Don't call tools. In the message, say in 1-2 sentences "
+                "what the real difference is for my family. No question unless a choice really depends on it.")
         if kind == "chip_edit":
             return self._chip_edit(event)
         raise ValueError(f"Unknown event type: {kind}")
@@ -165,10 +174,29 @@ class GuidedSession:
         self.needs = [n for n in self.needs if n["need"] != need_id]
         if not event.get("removed"):
             self.needs.append({"need": need_id, "mode": event.get("mode", "prefer"), "value": event.get("value")})
-        self.last = search.find(copy.deepcopy(self.needs), self.semantic_query)
+        self.last = search.find(self.needs, self.semantic_query)
         self.agent.messages.append({"role": "user", "content": [{"text": f"(I changed my criteria: {json.dumps(event)})"}]})
         self.agent.messages.append({"role": "assistant", "content": [{"text": "Updated the results."}]})
         return self._blocks(None)
+
+    def _comparison(self, school_ids: list[str]) -> dict | None:
+        """Side-by-side table built in code from the same verify rules as the cards."""
+        schools = [search.get_school(i) for i in school_ids]
+        if len(schools) != 2 or None in schools:
+            return None
+        rows = []
+        for need in self.needs:
+            cells = []
+            for school in schools:
+                c = N.verify(school, copy.deepcopy(need))
+                shown = c["note"] or ", ".join(f"{e['field']}: {e['value']}" for e in c["evidence"][:1]) or ""
+                cells.append({"status": c["status"], "text": shown})
+            rows.append({"need": need["need"], "label": N.CATALOG[need["need"]]["label"], "cells": cells})
+        rows.append({"need": "data_quality", "label": "Data problems",
+                     "cells": [{"status": N.ATTENTION if N.quality_flags(s) else N.CONFIRMED,
+                                "text": " ".join(f["note"] for f in N.quality_flags(s)) or "None found"}
+                               for s in schools]})
+        return {"school_ids": school_ids, "names": [s["name"] for s in schools], "rows": rows}
 
     def _option_label(self, option_id: str | None) -> str:
         for o in (self.pending_question or {}).get("options", []):
@@ -180,7 +208,8 @@ class GuidedSession:
 
     def _blocks(self, decision: Decision | None) -> dict:
         blocks: list[dict[str, Any]] = []
-        labels = {c.need: c for c in (decision.chips if decision else [])}
+        self.chip_labels.update({c.need: c for c in (decision.chips if decision else [])})
+        labels = self.chip_labels
         chips = []
         for n in self.needs:
             c = labels.get(n["need"])
@@ -193,7 +222,7 @@ class GuidedSession:
         if chips:
             blocks.append({"type": "criteria_chips", "chips": chips, "unmapped": []})
 
-        if decision and decision.message:
+        if decision and decision.message and not self.comparison:  # a comparison carries it as its summary
             blocks.append({"type": "text", "markdown": decision.message})
 
         self.pending_question = None
@@ -202,6 +231,13 @@ class GuidedSession:
             self.pending_question = {"question_id": "q-" + uuid.uuid4().hex[:6], "text": q.text, "why": q.why,
                                      "options": [o.model_dump() for o in q.options], "allow_text": True}
             blocks.append({"type": "clarifying_question", **self.pending_question})
+
+        if self.comparison:
+            blocks.append({"type": "comparison", "school_ids": self.comparison["school_ids"],
+                           "names": self.comparison["names"], "rows": self.comparison["rows"],
+                           "summary": decision.message if decision else None})
+            self.comparison = None
+            return {"session_id": self.session_id, "blocks": blocks}
 
         results = (self.last or {}).get("results", [])
         by_id = {r["school_id"]: r for r in results}
