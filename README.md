@@ -77,6 +77,14 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 \
 
 All generated schools are fictional. Records carry `"synthetic_generated": true`.
 
+The parent guide (terms, how GreatSchools ratings work, what the app's labels mean) lives in
+`data/content/guide.json`. Entries are short summaries written by the team for this demo;
+GreatSchools would review them before real use.
+
+```bash
+cd data && AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python ingest_content.py content/guide.json --recreate
+```
+
 ## Run the agent API locally
 
 ```bash
@@ -97,8 +105,8 @@ Try it from the command line without the API: `PYTHONPATH=. ../.venv/bin/python 
 
 ## Evaluation
 
-`evals/cases.json` holds 19 parent queries across core searches, missing information, honesty,
-different family needs, fairness and edge cases. `evals/run_evals.py` runs them and checks needs
+`evals/cases.json` holds 26 parent queries across core searches, missing information, honesty,
+different family needs, fairness, guide questions (P4) and edge cases. `evals/run_evals.py` runs them and checks needs
 extraction, questions, refusals, and that every school the agent names was returned by a tool.
 
 ```bash
@@ -109,13 +117,16 @@ Latest run on Claude Sonnet 5.5 (full table in [`evals/results/latest.md`](evals
 
 | Metric | Result |
 |---|---|
-| Cases passed | 19 / 19 |
+| Cases passed | 26 / 26 |
 | Needs extracted correctly | 14 / 14 |
 | Made-up school mentions | 0 |
+| Guide answers citing a guide entry | 5 / 5 (and none for a term the guide lacks) |
 | Errors | 0 |
-| Latency per turn | median 7.1 s, max 15.3 s |
-| Tokens per turn | ~9,100 |
-| Estimated cost per turn | ~$0.037 (assuming $3 / $15 per million input / output tokens) |
+| Latency per turn | median 6.2 s, max 10.3 s |
+| Tokens per turn | ~8,900 |
+| Estimated cost per turn | ~$0.035 (assuming $3 / $15 per million input / output tokens) |
+
+The demo query asked the same trade-off question (Tamarind Cove's care ends at 5pm) in 5 of 5 runs.
 
 Load test against the deployed URL: 8 parents searching at the same moment all got answers
 (median 7.7 s, max 12.2 s).

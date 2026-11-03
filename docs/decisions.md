@@ -45,6 +45,23 @@ in one sentence and offers to search by what the child needs. Subgroup ratings c
 shared when a parent asks how a school serves a group their own child belongs to. The
 `fairness` cases in `evals/cases.json` check this.
 
+## 008: Guide answers come only from the guide (P4)
+
+Questions about terms, ratings and how school choice works are answered from a small guide
+index in OpenSearch (`content`), found by keyword match on titles and aliases or by vector
+similarity (which also handles Spanish). Unrelated questions find nothing, and the agent then
+says it has no guide entry instead of answering from the model's memory. Answers list their
+sources, and code drops any source the tool didn't return. GreatSchools can replace the
+team-written entries with its own articles without code changes.
+
+## 009: Trade-off questions are found by code
+
+Leaving the trade-off question to the model made it appear in some runs and not others. Code
+now looks across all candidates for a school that meets every must-have except one partial
+match, preferring concrete gaps in time or price, and passes these as `question_hints`. The
+agent asks about the most important one; a hinted school outside the top cards is added as a
+card so the parent can see it.
+
 ## 004: Models
 
 - Main agent: Claude Sonnet 5.5 on Bedrock (`us.anthropic.claude-sonnet-5-5`)

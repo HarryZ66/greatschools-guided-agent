@@ -6,10 +6,11 @@
 
 Checks per case (see evals/cases.json):
   needs        expected need ids were extracted (recall), and nothing unexpected (precision);
-               when a mode is given, it must match
+               when a mode is given, it must match; optional_needs may appear or not
   ask          the agent asked something (question block, or a question in its message)
   no_results   no school cards were returned
   refuse       the agent declined a demographic filter (or, when false, did not)
+  sources      the answer cites guide entries returned by lookup_content (or, when false, none)
   mention_any / mention_none   words that must / must not appear in the agent's text
   made_up      school names in the agent's text that no tool returned (should always be 0)
 
@@ -99,7 +100,7 @@ def run_case(case: dict, cores: dict) -> dict:
         found = [n for n in want if n in got]
         checks["needs_recall"] = len(found) == len(want)
         checks["needs_mode"] = all(got[n] == m for n, m in want.items() if m and n in got)
-        extra = [n for n in got if n not in want]
+        extra = [n for n in got if n not in want and n not in expect.get("optional_needs", [])]
         checks["needs_precision"] = not extra
     else:
         extra = []
@@ -112,6 +113,9 @@ def run_case(case: dict, cores: dict) -> dict:
     if "refuse" in expect:
         refused = any(m in lower for m in REFUSAL_MARKERS)
         checks["refuse"] = refused == expect["refuse"]
+    if "sources" in expect:
+        cited = [s for b in last["blocks"] if b["type"] == "text" for s in b.get("sources", [])]
+        checks["sources"] = bool(cited) == expect["sources"]
     if "mention_any" in expect:
         checks["mention_any"] = any(w.lower() in lower for w in expect["mention_any"])
     if "mention_none" in expect:

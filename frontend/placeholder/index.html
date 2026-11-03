@@ -66,7 +66,8 @@ function render(blocks) {
       el.className = "chips";
       el.innerHTML = b.chips.map(c => `<span class="chip ${c.mode}">${c.mode === "require" ? "Must: " : c.mode === "avoid" ? "Avoid: " : ""}${esc(c.label)}</span>`).join("");
     } else if (b.type === "text") {
-      el.className = "box"; el.textContent = b.markdown;
+      el.className = "box";
+      el.innerHTML = esc(b.markdown) + (b.sources ? `<div class="meta" style="margin-top:6px">From the guide: ${b.sources.map(s => esc(s.title)).join(" · ")}</div>` : "");
     } else if (b.type === "clarifying_question") {
       el.className = "box";
       el.innerHTML = `<strong>${esc(b.text)}</strong><div class="opts">${b.options.map(o => `<button data-opt="${esc(o.id)}">${esc(o.label)}</button>`).join("")}</div>`;

@@ -1,0 +1,340 @@
+[
+ {
+  "id": "public-school",
+  "kind": "term",
+  "title": "Public school",
+  "aliases": [
+   "district school",
+   "traditional public school"
+  ],
+  "body": "A free school run by the local school district and paid for with public money. Most families have a zoned public school: the one assigned to their home address. Public schools must accept students who live in their zone."
+ },
+ {
+  "id": "charter-school",
+  "kind": "term",
+  "title": "Charter school",
+  "aliases": [
+   "charter",
+   "public charter",
+   "lottery"
+  ],
+  "body": "A free public school that is run by its own board or organization instead of the school district. Charter schools have more freedom over how they teach, but they still follow state testing and safety rules. Anyone can apply. If more students apply than there are seats, many charter schools hold a lottery."
+ },
+ {
+  "id": "magnet-school",
+  "kind": "term",
+  "title": "Magnet school",
+  "aliases": [
+   "magnet",
+   "magnet program",
+   "lottery",
+   "audition"
+  ],
+  "body": "A free public school, run by the district, built around a special focus such as STEM, the arts or languages. Magnet schools often accept students from outside their zone. Some require an application, an audition or a lottery."
+ },
+ {
+  "id": "private-school",
+  "kind": "term",
+  "title": "Private school",
+  "aliases": [
+   "independent school",
+   "parochial school",
+   "religious school"
+  ],
+  "body": "A school that charges tuition and is not run by the government. Private schools set their own admission rules and curriculum. Many offer financial aid, and some states, including Florida, have scholarship programs that can help pay tuition. Eligibility and amounts change, so check the state program directly."
+ },
+ {
+  "id": "k8-center",
+  "kind": "term",
+  "title": "K-8 school",
+  "aliases": [
+   "K-8 center",
+   "K8"
+  ],
+  "body": "A school that serves kindergarten through 8th grade in one building, so children don't change schools between elementary and middle school."
+ },
+ {
+  "id": "montessori",
+  "kind": "term",
+  "title": "Montessori school",
+  "aliases": [
+   "Montessori"
+  ],
+  "body": "A school that uses the Montessori method: mixed-age classrooms, hands-on materials and children choosing much of their own work with a teacher's guidance. Most Montessori schools are private, but some public and charter schools use the method."
+ },
+ {
+  "id": "zoned-school",
+  "kind": "term",
+  "title": "Zoned school and attendance boundary",
+  "aliases": [
+   "zone",
+   "attendance zone",
+   "boundary",
+   "assigned school"
+  ],
+  "body": "Your zoned school is the public school assigned to your home address. The line around the homes it serves is its attendance boundary. Your child is guaranteed a seat at the zoned school. Boundaries can change, so confirm with the school district."
+ },
+ {
+  "id": "open-enrollment",
+  "kind": "term",
+  "title": "Open enrollment",
+  "aliases": [
+   "school choice",
+   "controlled open enrollment",
+   "out-of-zone"
+  ],
+  "body": "A way to enroll your child in a public school other than your zoned school, if that school has room. Rules, deadlines and whether the district provides a bus are different in every district. Florida districts run open enrollment, often called controlled open enrollment; check your district's website for this year's window."
+ },
+ {
+  "id": "iep",
+  "kind": "term",
+  "title": "IEP (Individualized Education Program)",
+  "aliases": [
+   "IEP",
+   "special education",
+   "special ed"
+  ],
+  "body": "A written plan for a student with a disability who needs special education services. It lists the child's goals and the services and supports the school will provide. Public schools, including charter schools, must follow a student's IEP. Ask any school how it has supported students with IEPs like your child's."
+ },
+ {
+  "id": "504-plan",
+  "kind": "term",
+  "title": "504 plan",
+  "aliases": [
+   "504",
+   "section 504"
+  ],
+  "body": "A plan that gives a student with a disability accommodations, such as extra test time or a seat near the teacher, so they can learn in a regular classroom. It is different from an IEP, which adds special education services."
+ },
+ {
+  "id": "ell",
+  "kind": "term",
+  "title": "English learner (ELL / ESL) support",
+  "aliases": [
+   "ELL",
+   "ESL",
+   "ESOL",
+   "English language learner",
+   "bilingual"
+  ],
+  "body": "Help for students who are still learning English, such as extra English classes or support inside regular classes. Some schools also have staff who speak families' home languages and translate school messages. Ask what support your child would get and for how long."
+ },
+ {
+  "id": "gifted",
+  "kind": "term",
+  "title": "Gifted program",
+  "aliases": [
+   "gifted and talented",
+   "GT",
+   "advanced learning"
+  ],
+  "body": "Extra challenge for students who learn quickly or show high ability, through separate classes, pull-out groups or advanced work in class. Schools usually test or screen students to decide who qualifies."
+ },
+ {
+  "id": "stem",
+  "kind": "term",
+  "title": "STEM",
+  "aliases": [
+   "science technology engineering math",
+   "STEAM",
+   "robotics",
+   "coding"
+  ],
+  "body": "Science, Technology, Engineering and Math. A STEM school or program puts extra focus on these subjects, often with labs, robotics, coding or engineering projects. STEAM adds the arts. A school's STEM label doesn't tell you which clubs or teams it has, so ask."
+ },
+ {
+  "id": "cte",
+  "kind": "term",
+  "title": "CTE (Career and Technical Education)",
+  "aliases": [
+   "CTE",
+   "career technical education",
+   "vocational",
+   "career academy",
+   "job training",
+   "career classes"
+  ],
+  "body": "Classes that teach job skills for specific careers, such as health care, information technology, construction or culinary arts, usually in middle and high school. Students can often earn industry certifications while still in school."
+ },
+ {
+  "id": "ap",
+  "kind": "term",
+  "title": "AP (Advanced Placement) classes",
+  "aliases": [
+   "AP",
+   "advanced placement"
+  ],
+  "body": "College-level classes taught in high school. Students take an AP exam at the end of the year, and a good score can earn college credit at many colleges."
+ },
+ {
+  "id": "ib",
+  "kind": "term",
+  "title": "IB (International Baccalaureate)",
+  "aliases": [
+   "IB",
+   "international baccalaureate"
+  ],
+  "body": "A demanding international program with its own classes and exams. Students who complete the full IB Diploma in high school may earn college credit. Some schools also offer IB programs for younger grades."
+ },
+ {
+  "id": "dual-enrollment",
+  "kind": "term",
+  "title": "Dual enrollment",
+  "aliases": [
+   "dual credit",
+   "college classes in high school"
+  ],
+  "body": "High school students taking real college courses, often for free, that count for both high school and college credit."
+ },
+ {
+  "id": "student-teacher-ratio",
+  "kind": "term",
+  "title": "Student-teacher ratio",
+  "aliases": [
+   "class size",
+   "ratio"
+  ],
+  "body": "The number of students for each teacher at a school. It is a rough guide to class size, not an exact count, because some teachers don't lead regular classes. Lower usually means more attention for each student."
+ },
+ {
+  "id": "after-school-care",
+  "kind": "term",
+  "title": "After-school care",
+  "aliases": [
+   "aftercare",
+   "after care",
+   "before and after care",
+   "extended day"
+  ],
+  "body": "Supervised care at or near school after the school day ends, often until 5 or 6pm. It may cost extra and may fill up. Ask the exact end time, the cost and whether there is a waitlist."
+ },
+ {
+  "id": "gs-summary-rating",
+  "kind": "framework",
+  "title": "GreatSchools Summary Rating",
+  "aliases": [
+   "summary rating",
+   "GreatSchools rating",
+   "school rating",
+   "rating out of 10",
+   "1 to 10 score"
+  ],
+  "body": "A 1 to 10 score that GreatSchools gives many public and charter schools. It combines several themed ratings, such as test scores, student progress (how much students grow from year to year), college readiness for high schools, and equity (how well a school serves students from different groups). 1 to 4 means below average, 5 to 6 average, and 7 to 10 above average, compared with schools in the same state. Not every school has one: most private schools don't report the data it needs."
+ },
+ {
+  "id": "gs-test-score-rating",
+  "kind": "framework",
+  "title": "Test Score Rating",
+  "aliases": [
+   "test scores",
+   "test score rating"
+  ],
+  "body": "Compares how students at a school did on state tests with students across the state, on a 1 to 10 scale. Test scores show where students are now, not how much the school helped them grow."
+ },
+ {
+  "id": "gs-student-progress-rating",
+  "kind": "framework",
+  "title": "Student Progress Rating",
+  "aliases": [
+   "student progress",
+   "growth",
+   "academic progress"
+  ],
+  "body": "Shows how much students improve at a school from one year to the next, compared with similar students elsewhere, on a 1 to 10 scale. A high progress rating can mean a school helps students learn a lot, even if its test scores are average."
+ },
+ {
+  "id": "gs-college-readiness",
+  "kind": "framework",
+  "title": "College Readiness Rating",
+  "aliases": [
+   "college readiness",
+   "college ready"
+  ],
+  "body": "For high schools: how well a school prepares students for college, using measures such as graduation rates, college entrance exam results and advanced course taking, on a 1 to 10 scale."
+ },
+ {
+  "id": "gs-equity",
+  "kind": "framework",
+  "title": "Equity Rating and subgroup ratings",
+  "aliases": [
+   "equity",
+   "low-income rating",
+   "subgroup",
+   "test scores by group"
+  ],
+  "body": "Shows whether a school serves all its students well, including students from low-income families, students with disabilities and students from different racial and ethnic groups. A parent can use it to see how a school does for students like their own child. Our app never uses it to sort schools by who attends them."
+ },
+ {
+  "id": "gs-reviews",
+  "kind": "framework",
+  "title": "Parent reviews",
+  "aliases": [
+   "reviews",
+   "community rating",
+   "star rating",
+   "parent opinions"
+  ],
+  "body": "Reviews written by parents and students, with a 1 to 5 star community rating. They show what families experience day to day, but each review is one family's view and older reviews may not reflect the school today. Our app shows how recent the reviews are."
+ },
+ {
+  "id": "gs-rating-limits",
+  "kind": "framework",
+  "title": "What ratings can't tell you",
+  "aliases": [
+   "limits of ratings",
+   "choosing a school",
+   "school visit"
+  ],
+  "body": "Ratings are a starting point. They don't show whether a school fits your child: the feel of the classrooms, the teachers, how the school handles problems, or practical things like pickup times and transportation. Visit, ask questions and talk to other families before you decide."
+ },
+ {
+  "id": "app-statuses",
+  "kind": "app",
+  "title": "Confirmed, partial, needs attention and missing",
+  "aliases": [
+   "icons",
+   "check marks",
+   "statuses",
+   "confirmed",
+   "partial",
+   "needs attention",
+   "missing data"
+  ],
+  "body": "For each thing you asked for, we check the school's data. Confirmed means the data shows the school meets it. Partial means it meets it in part, or the data is old. Needs attention means the data shows a problem. Missing means we have no data on it, so ask the school. These checks come from the data itself, not from AI guesses."
+ },
+ {
+  "id": "app-old-data",
+  "kind": "app",
+  "title": "Why some information is marked as old",
+  "aliases": [
+   "stale data",
+   "out of date",
+   "old data",
+   "as of date"
+  ],
+  "body": "Schools change. When a school's profile or a rating is more than about 18 months old, or a review is more than 3 years old, we show the date and treat it as less certain. Ask the school whether it is still true."
+ },
+ {
+  "id": "app-school-reported",
+  "kind": "app",
+  "title": "School-reported information",
+  "aliases": [
+   "school reported",
+   "school profile",
+   "osp"
+  ],
+  "body": "Some details, like clubs, sports, bus service and after-school hours, come from the school itself. We show them as reported, with the date they were last updated, because we can't check them independently."
+ },
+ {
+  "id": "app-synthetic-data",
+  "kind": "app",
+  "title": "About the data in this demo",
+  "aliases": [
+   "demo data",
+   "synthetic data",
+   "real data",
+   "made-up data"
+  ],
+  "body": "This hackathon demo uses made-up schools, ratings and reviews in the same format as GreatSchools data. No real school or student data is used. The guide entries are short summaries written by our team; GreatSchools would review them before real use."
+ }
+]

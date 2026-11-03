@@ -1,6 +1,7 @@
 """OpenSearch retrieval plus code-side verification and ranking."""
 
 import json
+import re
 from collections import Counter
 from functools import lru_cache
 
@@ -53,6 +54,17 @@ def resolve_location(value: dict) -> dict | None:
     return {"lat": sum(p["lat"] for p in points) / len(points), "lon": sum(p["lon"] for p in points) / len(points)}
 
 
+@lru_cache(maxsize=1)
+def covered_cities() -> dict:
+    """Where we actually have schools, so the agent can say so accurately instead of guessing."""
+    aggs = client().search(index=SCHOOLS_INDEX, body={
+        "size": 0,
+        "aggs": {"states": {"terms": {"field": "state", "size": 10},
+                            "aggs": {"cities": {"terms": {"field": "city", "size": 60}}}}},
+    })["aggregations"]["states"]["buckets"]
+    return {s["key"]: {c["key"]: c["doc_count"] for c in s["cities"]["buckets"]} for s in aggs}
+
+
 def _filters(needs: list[dict]) -> tuple[list[dict], dict]:
     """Hard filters for required grade, type and location. Returns (filters, notes)."""
     filters, notes = [], {}
@@ -68,6 +80,7 @@ def _filters(needs: list[dict]) -> tuple[list[dict], dict]:
             center = resolve_location(value)
             if center is None:
                 notes["location"] = f"We have no schools in '{value.get('city')}' in our data."
+                notes["cities_with_data"] = covered_cities()
                 filters.append({"term": {"city": "__none__"}})
             else:
                 value["_center"] = center
@@ -108,12 +121,53 @@ def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) ->
             "quality_flags": N.quality_flags(school),
         })
     results.sort(key=lambda r: r["score"], reverse=True)
-    results = results[:size]
     for rank, r in enumerate(results, 1):
         r["rank"] = rank
+    # Trade-offs are found across every candidate; a hinted school outside the top cards is
+    # added as an extra card so the agent never talks about a school the parent can't see.
+    hints, hinted_ids = question_hints(needs, results)
+    shown = results[:size]
+    shown += [r for r in results[size:] if r["school_id"] in hinted_ids]
+    for r in shown:
         r["watch_out"] = watch_out(r)
 
-    return {"results": results, "summary": summarize(needs, results), "notes": notes, "total_candidates": len(hits)}
+    return {"results": shown, "summary": summarize(needs, shown), "notes": notes,
+            "question_hints": hints, "total_candidates": len(hits)}
+
+
+FILTER_NEEDS = {"grade_level", "location", "school_type"}  # already enforced by the search itself
+
+
+def question_hints(needs: list[dict], results: list[dict]) -> tuple[list[str], set[str]]:
+    """Trade-offs worth asking about, found in code so the agent asks them reliably.
+
+    1. A top school meets every other must-have but only partly meets one (e.g. care ends at 5,
+       parent needs 6): ask whether that is workable.
+    2. No result confirms a must-have: ask whether it's truly a must, or what to relax.
+    """
+    hints = []
+    required = [n["need"] for n in needs if n.get("mode") == "require" and n["need"] not in FILTER_NEEDS]
+    valued = {n["need"] for n in needs if n.get("value")}  # needs with a time or price: concrete trade-offs
+    candidates = []
+    for r in results:
+        by_need = {c["need"]: c for c in r["criteria"]}
+        partial = [n for n in required if by_need[n]["status"] == N.PARTIAL]
+        others_ok = all(by_need[n]["status"] == N.CONFIRMED for n in required if n not in partial)
+        if len(partial) == 1 and others_ok:
+            confirmed = sum(c["status"] == N.CONFIRMED for c in r["criteria"] if c["need"] not in FILTER_NEEDS)
+            candidates.append((partial[0] in valued, confirmed, -r["rank"], r, by_need[partial[0]]))
+    candidates.sort(key=lambda t: t[:3], reverse=True)
+    hinted_ids = set()
+    for _, _, _, r, c in candidates[:2]:
+        hinted_ids.add(r["school_id"])
+        hints.append(f"Trade-off: {r['name']} meets every other must-have, but "
+                     f"{N.CATALOG[c['need']]['label']} is only partial: {(c['note'] or '').rstrip('.')}. "
+                     "Ask if that is workable.")
+    for need in required:
+        if results and not any(c["need"] == need and c["status"] == N.CONFIRMED for r in results for c in r["criteria"]):
+            hints.append(f"No result confirms the must-have '{N.CATALOG[need]['label']}'. Ask if it is a must, "
+                         "or what they could relax.")
+    return hints[:3], hinted_ids
 
 
 def watch_out(result: dict) -> str | None:
@@ -161,6 +215,46 @@ def find_by_name(name: str, size: int = 3) -> list[dict]:
         }},
     })["hits"]["hits"]
     return [{"school_id": h["_id"], **h["_source"], "match_score": round(h["_score"], 2)} for h in hits]
+
+
+CONTENT_INDEX = "content"
+
+
+MIN_SIMILARITY = 0.35  # below this, a vector-only match is treated as "no guide entry"
+# Words too common in school questions to count as a term match on their own
+EVERYDAY_WORDS = {"school", "schools", "need", "needs", "mean", "means", "meaning", "work", "works", "kid", "kids",
+                  "child", "son", "daughter", "class", "classes", "program", "programs", "good", "best", "high",
+                  "what", "whats", "what's", "does", "do", "how", "why", "which", "who", "when", "where", "can",
+                  "tell", "you", "me", "my", "i", "we", "our"}
+
+
+def lookup_content(question: str, k: int = 3) -> list[dict]:
+    """Relevant guide entries for a question about terms, ratings or the app.
+
+    An entry is relevant if its title or an alias matches the question's words (exact terms
+    like "CTE"), or its meaning is close enough by vector similarity (paraphrases and other
+    languages). Unrelated questions return nothing, so the agent says it has no guide entry.
+    """
+    fields = ["id", "kind", "title", "body", "source"]
+    terms = " ".join(w for w in re.findall(r"[\w'-]+", question) if w.lower() not in EVERYDAY_WORDS)
+    keyword = client().search(index=CONTENT_INDEX, body={
+        "size": k, "_source": fields,
+        "query": {"multi_match": {"query": terms, "fields": ["title^2", "aliases"]}},
+    })["hits"]["hits"] if terms else []
+    vector = client().search(index=CONTENT_INDEX, body={
+        "size": 8, "_source": fields,
+        "query": {"knn": {"vector": {"vector": embed(question), "k": 8}}},
+    })["hits"]["hits"]
+
+    merged: dict[str, dict] = {}
+    for h in vector:
+        # Lucene cosine scores are (1 + cos) / 2; convert back to cosine similarity
+        merged[h["_id"]] = {**h["_source"], "similarity": round(2 * h["_score"] - 1, 3), "term_match": False}
+    for h in keyword:
+        merged.setdefault(h["_id"], {**h["_source"], "similarity": 0.0})["term_match"] = True
+    relevant = [e for e in merged.values() if e["term_match"] or e["similarity"] >= MIN_SIMILARITY]
+    relevant.sort(key=lambda e: e["similarity"] + (0.5 if e["term_match"] else 0), reverse=True)
+    return relevant[:k]
 
 
 def get_school(school_id: str) -> dict | None:

@@ -57,6 +57,8 @@ class Decision(BaseModel):
     message: str = Field(description="1-3 plain sentences for the parent. No jargon. Don't restate the cards. "
                                      "If you ask a question, don't repeat it here.")
     callouts: list[Callout] = Field(default_factory=list, description="0-2 honest notes about the data")
+    sources: list[str] = Field(default_factory=list,
+                               description="ids of guide entries from lookup_content that your message relies on")
 
 
 SYSTEM_PROMPT = """You are GreatSchools' guided school-search agent. Motto: "We investigate. You decide."
@@ -67,15 +69,21 @@ How you work:
    require (must have), prefer (nice to have) or avoid. grade_level and location are always required.
    Infer needs from plain words ("my 6th grader" -> grade_level ["m"]; "I work until 6" -> after_school_care "18:00").
 2. If grade level or location is unknown, don't search: ask for it, and still return chips for the
-   needs you already know.
+   needs you already know. If find_schools says a city isn't in our data, describe where we do have
+   schools from its cities_with_data list (name the areas with the most schools), never from memory.
 3. Otherwise call find_schools with ALL current needs (it replaces the previous search). Pass a short
    semantic_query describing the softer wishes in the parent's words.
-4. Read the summary counts. Ask ONE question only if the answer would change the ranking, for example:
-   a required need is missing for most schools, needs conflict, or a partial match needs a trade-off
-   ("Care at the top schools ends at 5pm. Is that workable?"). Otherwise ask nothing.
+4. Read the summary counts and question_hints. If question_hints is not empty, ask ONE question about
+   the most important hint, naming the school and the trade-off, e.g. "Tamarind Cove has the STEM
+   program you want, but care ends at 5pm. Could someone pick him up at 5, or do you need 6?".
+   Otherwise ask only if the answer would clearly change the ranking (e.g. cost: free vs private).
 5. When the parent asks about one school, use get_school_profile with its school_id. If the school
    isn't in your latest results, first call find_school_by_name, then get_school_profile. If several
    schools match, say which one you checked. If none match, say the school isn't in our data.
+6. When the parent asks what a term means, how ratings work, how school choice works, or what the
+   app's labels mean, call lookup_content and explain using only what it returns, in plain words,
+   and list the entry ids in sources. If it returns nothing, say you don't have a guide entry for
+   that yet and suggest asking the school or district; don't explain it from memory.
 
 Honesty rules:
 - Never claim a school meets a need unless find_schools says confirmed. Never invent facts, numbers or quotes.
@@ -114,6 +122,7 @@ class GuidedSession:
         self.comparison: dict | None = None
         self.chip_labels: dict[str, ChipLabel] = {}  # the agent's wording, kept across chip edits
         self.seen_ids: set[str] = set()  # every school a tool returned; evals check the model stays inside it
+        self.seen_content: dict[str, str] = {}  # guide entry id -> title, for sources the model may cite
         self.usage = {"inputTokens": 0, "outputTokens": 0, "model_calls": 0}
         self.agent = self._new_agent()
 
@@ -178,7 +187,21 @@ class GuidedSession:
             return json.dumps({"matches": matches,
                                "next": "Call get_school_profile with the best match's school_id."})
 
-        return [find_schools, get_school_profile, find_school_by_name]
+        @tool
+        def lookup_content(question: str) -> str:
+            """Look up GreatSchools guide entries: terms (charter, IEP, CTE...), how ratings work,
+            how school choice works, and what the app's labels mean.
+
+            Args:
+                question: The parent's question, in their words.
+            """
+            entries = search.lookup_content(question)
+            session.seen_content.update({e["id"]: e["title"] for e in entries})
+            if not entries:
+                return json.dumps({"entries": [], "note": "No guide entry covers this."})
+            return json.dumps({"entries": [{k: e[k] for k in ("id", "title", "body", "source")} for e in entries]})
+
+        return [find_schools, get_school_profile, find_school_by_name, lookup_content]
 
     # ---------------------------------------------------------------- turns
 
@@ -300,7 +323,9 @@ class GuidedSession:
             blocks.append({"type": "criteria_chips", "chips": chips, "unmapped": []})
 
         if decision and decision.message and not self.comparison:  # a comparison carries it as its summary
-            blocks.append({"type": "text", "markdown": decision.message})
+            # Only entries lookup_content actually returned can be cited
+            sources = [{"id": s, "title": self.seen_content[s]} for s in decision.sources if s in self.seen_content]
+            blocks.append({"type": "text", "markdown": decision.message, **({"sources": sources} if sources else {})})
 
         self.pending_question = None
         if decision and decision.question:
@@ -342,6 +367,7 @@ def _compact(found: dict) -> dict:
         "total_candidates": found["total_candidates"],
         "notes": found["notes"],
         "summary_counts": found["summary"],
+        "question_hints": found["question_hints"],
         "results": [{
             "school_id": r["school_id"], "name": r["name"], "type": r["entity_type"], "city": r["city"],
             "rank": r["rank"], "score": r["score"],

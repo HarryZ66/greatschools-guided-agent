@@ -207,10 +207,12 @@ Streamed while the agent works (the "I checked this for you" trace).
 
 ### `text`
 
-Plain answer, e.g. a term definition.
+Plain answer, e.g. a term definition. `sources` is present when the answer comes from the
+parent guide (P4); it lists only entries the `lookup_content` tool actually returned.
 
 ```json
-{"type": "text", "markdown": "**Charter school**: a free public school run independently, often entered by lottery."}
+{"type": "text", "markdown": "A charter school is a free public school run by its own board…",
+ "sources": [{"id": "charter-school", "title": "Charter school"}]}
 ```
 
 ## 5. Rules the backend enforces
