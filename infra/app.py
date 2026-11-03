@@ -3,6 +3,7 @@ import os
 
 import aws_cdk as cdk
 
+from stacks.app_stack import AppStack
 from stacks.data_stack import DataStack
 
 app = cdk.App()
@@ -12,7 +13,8 @@ env = cdk.Environment(
     region="us-east-1",
 )
 
-DataStack(app, "GsDataStack", env=env)
+data = DataStack(app, "GsDataStack", env=env)
+AppStack(app, "GsAppStack", domain=data.domain, table=data.table, env=env)
 
 cdk.Tags.of(app).add("project", "greatschools-guided-agent")
 

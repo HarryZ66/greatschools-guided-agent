@@ -9,8 +9,9 @@ import threading
 import time
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from . import search, store
@@ -26,6 +27,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    """Always answer in JSON, so the frontend can show a message instead of failing to parse."""
+    log.exception("unhandled error on %s", request.url.path)
+    return JSONResponse(status_code=500, content={
+        "detail": "Something went wrong on our side. Please try again, or start a new search.",
+        "error": type(exc).__name__,
+    })
+
 
 # Sessions live in memory: one agent conversation per parent. Fine for a single
 # hackathon task; production would persist conversation state (e.g. in DynamoDB).

@@ -25,23 +25,39 @@ schools with evidence. It says so when data is missing or stale instead of guess
 | Amazon Bedrock | Claude models for the agent, Titan Text Embeddings v2 for semantic search |
 | Amazon OpenSearch Service | Keyword and vector search over school documents |
 | Amazon DynamoDB | Session state, saved schools and thumbs up/down feedback |
-| Amazon S3 | Data files |
+| Amazon S3 | Data files and the frontend site |
+| Amazon ECS on AWS Fargate (ARM64) | Runs the agent API container |
+| Elastic Load Balancing (ALB) | Routes traffic to the agent task |
+| Amazon CloudFront | One HTTPS URL: `/api/*` goes to the agent, everything else to the frontend |
+| Amazon ECR | Stores the agent image (created by CDK) |
 
 All resources are in `us-east-1`.
 
+```
+Browser ──HTTPS──▶ CloudFront ──/api/*──▶ ALB ──▶ Fargate task (FastAPI + Strands agent)
+                       │                               │
+                       └──/*──▶ S3 (frontend)          ├──▶ Bedrock (Claude, Titan embeddings)
+                                                       ├──▶ OpenSearch (schools index)
+                                                       └──▶ DynamoDB (saves, feedback, metrics)
+```
+
 ## Deploy
 
-Prerequisites: Python 3.12+, Node.js 20+, AWS CLI v2, AWS CDK CLI, and AWS credentials
-for the target account.
+Prerequisites: Python 3.12+, Node.js 22+, AWS CLI v2, AWS CDK CLI, a Docker-compatible
+runtime (Docker Desktop, Finch or Colima) and AWS credentials for the target account.
 
 ```bash
 cd infra
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cdk bootstrap   # once per account and region
-cdk deploy GsDataStack
+cdk bootstrap        # once per account and region
+cdk deploy --all     # GsDataStack (search, table, bucket) then GsAppStack (agent + site)
 ```
+
+The app URL is printed as `GsAppStack.AppUrl`. To ship a frontend build, run
+`npm run build` in `frontend/` (it writes `frontend/dist`) and run `cdk deploy GsAppStack` again;
+without a build, a small API test page from `frontend/placeholder/` is served.
 
 To tear everything down:
 

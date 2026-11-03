@@ -32,4 +32,4 @@ data/raw/
 .vscode/
 
 # Account-specific deploy outputs
-infra/cdk-outputs.json
+infra/cdk-outputs*.json

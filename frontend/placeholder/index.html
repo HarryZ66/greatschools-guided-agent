@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guided Agent API test page</title>
+<style>
+  :root { --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --card: #fff; --line: #e3e3de;
+          --ok: #1f7a4d; --part: #9a6a00; --bad: #b3261e; --miss: #6b6b66; --accent: #2c5cc5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
+  main { max-width: 820px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  form { display: flex; gap: 8px; }
+  input { flex: 1; padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; }
+  button { padding: 8px 14px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chips, .opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+  .chip { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-size: 13px; }
+  .chip.require { border-color: var(--accent); }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
+  .callout { border-left: 3px solid var(--part); }
+  .card h3 { margin: 0 0 2px; font-size: 16px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .crit { display: grid; grid-template-columns: 20px 1fr; gap: 2px 6px; margin-top: 8px; font-size: 14px; }
+  .confirmed { color: var(--ok); } .partial { color: var(--part); } .needs_attention { color: var(--bad); } .missing { color: var(--miss); }
+  .watch { margin-top: 8px; font-size: 13px; color: var(--bad); }
+  .status { color: var(--muted); font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Guided Agent: API test page</h1>
+  <p class="sub">A stand-in until the real frontend is deployed. It calls <code>/api/turn</code> on this same URL.</p>
+  <form id="f"><input id="q" placeholder="e.g. middle school near Miami, he loves robotics, I work until 6pm" autocomplete="off"><button class="primary">Ask</button></form>
+  <div class="status" id="status"></div>
+  <div id="out"></div>
+</main>
+<script>
+const ICON = { confirmed: "✅", partial: "◐", needs_attention: "⚠️", missing: "❔" };
+let sessionId = null;
+const out = document.getElementById("out"), status = document.getElementById("status");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function send(event) {
+  status.textContent = "Checking schools for you…";
+  try {
+    const r = await fetch("/api/turn", { method: "POST", headers: { "content-type": "application/json" },
+                                         body: JSON.stringify({ session_id: sessionId, event }) });
+    const raw = await r.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { throw new Error(`server returned ${r.status}: ${raw.slice(0, 120)}`); }
+    if (!r.ok) throw new Error(data.detail || r.status);
+    sessionId = data.session_id;
+    status.textContent = `Answered in ${(data.elapsed_ms / 1000).toFixed(1)}s`;
+    render(data.blocks);
+  } catch (e) { status.textContent = "Error: " + e.message; }
+}
+
+function render(blocks) {
+  out.innerHTML = "";
+  for (const b of blocks) {
+    const el = document.createElement("div");
+    if (b.type === "criteria_chips") {
+      el.className = "chips";
+      el.innerHTML = b.chips.map(c => `<span class="chip ${c.mode}">${c.mode === "require" ? "Must: " : c.mode === "avoid" ? "Avoid: " : ""}${esc(c.label)}</span>`).join("");
+    } else if (b.type === "text") {
+      el.className = "box"; el.textContent = b.markdown;
+    } else if (b.type === "clarifying_question") {
+      el.className = "box";
+      el.innerHTML = `<strong>${esc(b.text)}</strong><div class="opts">${b.options.map(o => `<button data-opt="${esc(o.id)}">${esc(o.label)}</button>`).join("")}</div>`;
+      el.querySelectorAll("button").forEach(btn => btn.onclick = () => send({ type: "answer", question_id: b.question_id, option_id: btn.dataset.opt }));
+    } else if (b.type === "evidence_callout") {
+      el.className = "box callout"; el.textContent = b.text;
+    } else if (b.type === "school_results") {
+      el.innerHTML = b.results.map(r => `<div class="box card"><h3>${r.rank}. ${esc(r.name)}</h3>
+        <div class="meta">${esc(r.entity_type)} · ${esc(r.city)} · match ${(r.score * 100).toFixed(0)}%</div>
+        <div class="crit">${r.criteria.map(c => `<span>${ICON[c.status]}</span><span class="${c.status}">${esc(c.need.replace(/_/g, " "))}${c.note ? ": " + esc(c.note) : ""}</span>`).join("")}</div>
+        ${r.watch_out ? `<div class="watch">Watch out: ${esc(r.watch_out)}</div>` : ""}</div>`).join("");
+    } else if (b.type === "comparison") {
+      el.className = "box"; el.textContent = b.summary || "";
+    }
+    out.appendChild(el);
+  }
+}
+
+document.getElementById("f").onsubmit = e => {
+  e.preventDefault();
+  const text = document.getElementById("q").value.trim();
+  if (text) send({ type: "query", text });
+};
+</script>
+</body>
+</html>

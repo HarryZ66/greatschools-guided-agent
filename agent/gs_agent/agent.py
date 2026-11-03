@@ -11,8 +11,10 @@ import uuid
 from typing import Any, Literal
 
 import boto3
+from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field
 from strands import Agent, tool
+from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models import BedrockModel
 
 from . import needs as N
@@ -96,12 +98,17 @@ class GuidedSession:
         self.pending_question: dict | None = None
         self.comparison: dict | None = None
         self.chip_labels: dict[str, ChipLabel] = {}  # the agent's wording, kept across chip edits
-        self.agent = Agent(
+        self.agent = self._new_agent()
+
+    def _new_agent(self, messages: list | None = None) -> Agent:
+        return Agent(
             # Claude 5.x models on Bedrock reject `temperature`, so it's left at the default.
             model=BedrockModel(model_id=MAIN_MODEL, boto_session=boto3.Session(region_name=REGION),
                                max_tokens=4000),
             tools=self._tools(),
             system_prompt=SYSTEM_PROMPT.format(catalog=_catalog_text()),
+            conversation_manager=SlidingWindowConversationManager(window_size=60),
+            messages=messages,
             callback_handler=None,
         )
 
@@ -164,9 +171,37 @@ class GuidedSession:
         raise ValueError(f"Unknown event type: {kind}")
 
     def _agent_turn(self, text: str) -> dict:
-        result = self.agent(text, structured_output_model=Decision)
+        self._drop_old_thinking()
+        try:
+            result = self.agent(text, structured_output_model=Decision)
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") != "ValidationException":
+                raise
+            # Bedrock rejected the stored history. Start a fresh conversation that keeps
+            # what the parent has told us so far, and try once more.
+            recap = (f"(Context from earlier in this conversation: the parent's current needs are "
+                     f"{json.dumps(self._needs_for_prompt())}.)")
+            self.agent = self._new_agent()
+            result = self.agent(f"{recap}\n\n{text}", structured_output_model=Decision)
         decision: Decision = result.structured_output
         return self._blocks(decision)
+
+    def _drop_old_thinking(self) -> None:
+        """Remove thinking blocks from finished turns.
+
+        Each thinking block is bound to the exact history before it. Once the sliding window
+        trims old messages, those blocks no longer match and Bedrock rejects the request.
+        The model doesn't need its old thinking, so strip it before every new turn.
+        """
+        for message in self.agent.messages:
+            content = message.get("content", [])
+            kept = [block for block in content if "reasoningContent" not in block]
+            if len(kept) != len(content):
+                message["content"] = kept or [{"text": "(thinking)"}]
+
+    def _needs_for_prompt(self) -> list[dict]:
+        return [{k: ({kk: vv for kk, vv in v.items() if not kk.startswith("_")} if isinstance(v, dict) else v)
+                 for k, v in n.items()} for n in self.needs]
 
     def _chip_edit(self, event: dict) -> dict:
         """Editing a chip re-runs search and verify in code; no model call."""

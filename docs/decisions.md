@@ -21,6 +21,21 @@ One `t3.medium.search` data node with a public HTTPS endpoint and an IAM-based a
 policy. It's cheap (well under the $500 sandbox cap for three days) and supports k-NN
 vector search. Production would use a multi-AZ domain inside a VPC.
 
+## 005: Fargate behind CloudFront for the agent API
+
+An agent turn takes 5–12 seconds and makes several model and search calls. API Gateway's
+29-second limit leaves little margin, and Lambda would need conversation state moved out of
+memory. One ARM64 Fargate task behind an ALB runs the same FastAPI app we use locally, and
+CloudFront puts it and the frontend on one HTTPS URL (no CORS, no certificate to manage).
+Public subnets and no NAT gateway keep cost and setup time down; production would use
+private subnets, several tasks and session state in DynamoDB.
+
+## 006: Code-only paths where no judgment is needed
+
+Editing a chip, saving, thumbs and metrics never call the model. A chip edit re-runs search
+and verification in about a second. Comparison tables are built by the same verify rules as
+the cards; the model only writes the one-line summary.
+
 ## 004: Models
 
 - Main agent: Claude Sonnet 5.5 on Bedrock (`us.anthropic.claude-sonnet-5-5`)
