@@ -47,8 +47,9 @@ class DataStack(Stack):
             )
         )
 
-        # One table for sessions, saved schools and feedback.
-        # pk = SESSION#<id>; sk = STATE | SAVED#<school_id> | FEEDBACK#<ts>
+        # One table for saved schools, feedback and search metrics (see agent/gs_agent/store.py).
+        # pk = SESSION#<id>; sk = SAVED#<school_id> | FEEDBACK#<school_id> | SEARCH#<iso time>
+        # Conversations themselves are kept in memory by the agent task (decision 005).
         self.table = dynamodb.Table(
             self,
             "AppTable",

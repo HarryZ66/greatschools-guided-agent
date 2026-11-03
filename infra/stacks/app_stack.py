@@ -46,6 +46,7 @@ class AppStack(Stack):
             memory_limit_mib=2048,
             desired_count=1,
             public_load_balancer=True,
+            open_listener=False,  # only CloudFront may reach it; see the ingress rule below
             assign_public_ip=True,
             task_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             runtime_platform=ecs.RuntimePlatform(cpu_architecture=ecs.CpuArchitecture.ARM64,
@@ -64,6 +65,13 @@ class AppStack(Stack):
             circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
         )
         service.target_group.configure_health_check(path="/api/health", healthy_http_codes="200")
+
+        # The ALB has a public address (no NAT, see docs/decisions.md 005), but it only accepts
+        # traffic from CloudFront's origin-facing IP ranges, so nobody can skip the HTTPS URL.
+        cloudfront_ips = ec2.PrefixList.from_lookup(
+            self, "CloudFrontOriginFacing", prefix_list_name="com.amazonaws.global.cloudfront.origin-facing")
+        service.load_balancer.connections.allow_from(
+            ec2.Peer.prefix_list(cloudfront_ips.prefix_list_id), ec2.Port.tcp(80), "CloudFront only")
         service.target_group.set_attribute("deregistration_delay.timeout_seconds", "10")
 
         task_role = service.task_definition.task_role
@@ -114,4 +122,3 @@ class AppStack(Stack):
 
         CfnOutput(self, "AppUrl", value=f"https://{distribution.distribution_domain_name}")
         CfnOutput(self, "ApiUrl", value=f"https://{distribution.distribution_domain_name}/api")
-        CfnOutput(self, "LoadBalancerUrl", value=f"http://{service.load_balancer.load_balancer_dns_name}")
