@@ -10,8 +10,9 @@ Read before changing code:
 - `docs/decisions.md`: why things are the way they are
 - `docs/next-steps.md`: what's left to build, in priority order
 
-`frontend/` holds the React parent app (`src/`, still on mock data) and `frontend/placeholder/`, a
-test page that CDK serves until `frontend/dist` is built.
+`frontend/` holds the React parent app (`src/`, which calls the API through `src/api.js`) and
+`frontend/placeholder/`, a test page that CDK serves until `frontend/dist` is built. A change to
+blocks or endpoints in `docs/contract.md` needs the matching change in `frontend/src/App.jsx`.
 
 ## Rules
 

@@ -117,7 +117,10 @@ Saving and feedback skip the agent entirely:
   ("Care at Tamarind Cove ends at 5:00 PM. After-School Homework Help … runs 3:30 PM–6:00 PM …").
 - `GET /api/saved?session_id=…` → `{saved: [{school_id, name, at}]}`
 - `DELETE /api/saved/{school_id}?session_id=…` → `{saved: [...]}`
-- `POST /api/feedback`: `{session_id, school_id, vote: "up" | "down"}`
+- `POST /api/feedback`: `{session_id, turn, vote: "up" | "down"}` rates one agent reply ("Helpful?"
+  under each reply), where `turn` is the number that reply's response carried. `{session_id, school_id, vote}`
+  still rates one school. Send one of the two; a new vote replaces the old one. Both count toward
+  `relevance` in `/api/metrics`.
 - `GET /api/schools/{school_id}?session_id=…`: the school record plus a verified `profile` (P3):
   `criteria` (that session's needs, same rules as the cards), `quality_flags`, `reviews`
   (`by_topic` recent/older counts, up to 3 dated `excerpts` marked `older` past 3 years, `total`),
@@ -135,9 +138,18 @@ type and renders them in order. The agent chooses which blocks to send.
 ```json
 {
   "session_id": "abc123",
+  "turn": 3,
   "blocks": [ ... ]
 }
 ```
+
+`turn` numbers the replies in a session (1, 2, 3…), so the parent can rate one with `/api/feedback`.
+
+**Plain words.** Parents often don't know school terms (decision 024). Chip labels, suggestions,
+question options and code-written notes use everyday words: no acronyms such as IEP, 504, ELL or
+ESA, distances in miles ("About 6.3 miles from Hialeah."), ratings as "4 out of 10". The backend drops
+asides like "(IEP/504)" from model-written labels. Evidence `field` names stay as they are (they point
+at the data); show the `note` to parents, not the field.
 
 ### `trace` (top-level field, not a block)
 
@@ -250,7 +262,7 @@ come from code; programs with only past sessions are never listed (they are name
   "programs": [{
     "program_id": "fl-912345", "name": "After-School Robotics Club",
     "organization": "Coral Lantern Branch Library", "city": "Miami",
-    "distance_km": 1.0, "near": "Tamarind Cove STEM Academy", "meets_on": ["Mon", "Tue", "Wed", "Thu"],
+    "distance_km": 1.0, "distance_miles": 0.6, "near": "Tamarind Cove STEM Academy", "meets_on": ["Mon", "Tue", "Wed", "Thu"],
     "next_sessions": [{"date": "2026-11-03", "day": "Tue", "start": "17:00", "end": "18:30"}],
     "ages": "Ages 10-14", "cost": "Free", "registration_open": true,
     "time_fit": {"status": "confirmed", "note": "Runs 17:00-18:30, covering 17:00-18:00."},

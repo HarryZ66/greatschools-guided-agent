@@ -13,7 +13,7 @@ schools with evidence. It says so when data is missing or stale instead of guess
 |---|---|
 | `infra/` | AWS CDK app (Python) that defines every AWS resource |
 | `agent/` | Python agent (Strands Agents on Amazon Bedrock) and its tools |
-| `frontend/` | React app for parents |
+| `frontend/` | React app for parents, connected to the agent API (see `frontend/README.md`) |
 | `data/` | Synthetic data generator and OpenSearch ingestion scripts |
 | `evals/` | Test queries and evaluation scripts |
 | `docs/` | Architecture notes and decision records |

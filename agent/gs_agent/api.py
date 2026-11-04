@@ -83,9 +83,11 @@ class SaveRequest(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
+    """A thumbs vote on one agent reply (`turn`, from the response) or on one school (`school_id`)."""
     session_id: str
-    school_id: str
     vote: Literal["up", "down"]
+    turn: int | None = None
+    school_id: str | None = None
 
 
 @app.get("/api/health")
@@ -114,6 +116,9 @@ def _run_turn(session: GuidedSession, event: Event) -> dict:
             log.exception("could not load saved schools for %s", session.session_id)
             response["saved"] = [{"school_id": i, "name": None, "at": None} for i in sorted(session.saved)]
     response["elapsed_ms"] = int((time.time() - started) * 1000)
+    # Numbers this session's replies, so the parent can rate a reply (POST /api/feedback with `turn`)
+    session.turn_count = getattr(session, "turn_count", 0) + 1
+    response["turn"] = session.turn_count
     log.info("turn %s %s %dms", session.session_id, event.type, response["elapsed_ms"])
     return response
 
@@ -189,7 +194,9 @@ def unsave(school_id: str, session_id: str) -> dict:
 
 @app.post("/api/feedback")
 def feedback(request: FeedbackRequest) -> dict:
-    store.record_feedback(request.session_id, request.school_id, request.vote)
+    if request.turn is None and not request.school_id:
+        raise HTTPException(status_code=400, detail="Send the reply's turn or a school_id")
+    store.record_feedback(request.session_id, request.vote, school_id=request.school_id, turn=request.turn)
     return {"ok": True}
 
 

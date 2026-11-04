@@ -134,7 +134,7 @@ How you work:
    Help the parent find what matters: if they gave little beyond grade and location (e.g. "a good
    elementary school in Miami") and there are no question_hints, still search, then ask ONE question
    about what their child needs, because parents often don't know these can be checked. Offer the
-   3-4 options most likely for this family from: learning support (IEP or 504), after-school care,
+   3-4 options most likely for this family from: extra help with learning, after-school care,
    a school bus, counseling support, strong academics, small classes. If grade or location is
    missing, ask for that first (rule 2) and offer 1-2 of these as suggestions instead.
 5. When the parent asks about one school, use get_school_profile with its school_id. If the school
@@ -162,6 +162,14 @@ Honesty rules:
 - When data is missing or old, say so plainly and suggest asking the school.
 - Don't list the schools in your message; the app shows cards built from the tool results.
 - Write at a 6th-grade reading level. Answer in the parent's language.
+
+Plain words (many parents don't know school terms; this is a core goal of the app):
+- Chip labels, suggestions, questions, why text and answer options use everyday words only. No
+  acronyms or school-system terms: say "extra help with learning", not "IEP", "504" or "special ed";
+  "help learning English", not "ELL"; "a state scholarship", not "FES-EO" or "ESA".
+- In messages, use the everyday words too. Use a term only if the parent used it or asked about it,
+  and then explain it in the same sentence ("a written plan for extra help, called an IEP").
+- Say distances in miles, as the data notes do, and ratings as "4 out of 10".
 
 Fairness rule (fair housing):
 - Never filter, rank or recommend schools or neighborhoods by the race, ethnicity, national origin,
@@ -407,7 +415,7 @@ class GuidedSession:
             session.last_programs, session.programs_fresh = found, True
             session.seen_programs.update(p["program_id"] for p in found["programs"])
             return json.dumps({
-                "programs": [{k: p[k] for k in ("program_id", "name", "organization", "city", "distance_km", "near",
+                "programs": [{k: p[k] for k in ("program_id", "name", "organization", "city", "distance_km", "distance_miles", "near",
                                                 "meets_on", "next_sessions", "ages", "cost", "registration_open", "time_fit",
                                                 "quality_flags")} for p in found["programs"]],
                 "excluded_past": found["excluded_past"], "notes": found["notes"],
@@ -575,10 +583,10 @@ class GuidedSession:
             cells = []
             for school in schools:
                 c = N.verify(school, copy.deepcopy(need))
-                shown = c["note"] or ", ".join(f"{e['field']}: {e['value']}" for e in c["evidence"][:1]) or ""
+                shown = c["note"] or N.plain_evidence(c["evidence"][:1])
                 cells.append({"status": c["status"], "text": shown})
             rows.append({"need": need["need"], "label": N.CATALOG[need["need"]]["label"], "cells": cells})
-        rows.append({"need": "data_quality", "label": "Data problems",
+        rows.append({"need": "data_quality", "label": "Problems in our data",
                      "cells": [{"status": N.ATTENTION if N.quality_flags(s) else N.CONFIRMED,
                                 "text": " ".join(f["note"] for f in N.quality_flags(s)) or "None found"}
                                for s in schools]})
@@ -606,7 +614,8 @@ class GuidedSession:
         current = {n["need"] for n in self.needs}
         if decision:  # gaps are kept across chip edits until the agent's next answer
             self.unmapped = [u for u in decision.unmapped if u.strip()][:5]
-            self.suggestions = [{"need": g.need, "label": g.label, "why": g.why} for g in decision.suggestions
+            self.suggestions = [{"need": g.need, "label": plain_label(g.label, N.CATALOG.get(g.need, {}).get("label")),
+                                 "why": g.why} for g in decision.suggestions
                                 if g.need in N.CATALOG and g.need not in current][:2]
         else:
             self.suggestions = [g for g in self.suggestions if g["need"] not in current]
@@ -617,7 +626,7 @@ class GuidedSession:
             if isinstance(value, dict):
                 value = {k: v for k, v in value.items() if not k.startswith("_")}
             chips.append({"need": n["need"], "mode": n["mode"], "value": value,
-                          "label": c.label if c else N.CATALOG[n["need"]]["label"],
+                          "label": plain_label(c.label, N.CATALOG[n["need"]]["label"]) if c else N.CATALOG[n["need"]]["label"],
                           "source": c.source if c else "stated"})
         if chips or self.unmapped or self.suggestions:
             blocks.append({"type": "criteria_chips", "chips": chips, "unmapped": self.unmapped,
@@ -632,7 +641,8 @@ class GuidedSession:
         if decision and decision.question:
             q = decision.question
             self.pending_question = {"question_id": "q-" + uuid.uuid4().hex[:6], "text": q.text, "why": q.why,
-                                     "options": [o.model_dump() for o in q.options], "allow_text": True}
+                                     "options": [{"id": o.id, "label": plain_label(o.label)} for o in q.options],
+                                     "allow_text": True}
             blocks.append({"type": "clarifying_question", **self.pending_question})
 
         if self.comparison:
@@ -682,6 +692,18 @@ class GuidedSession:
 
 
 _NUMBER = re.compile(r"\d+(?:[.:,]\d+)*")
+
+# School-system terms parents often don't know (Vision doc: parents "don't know the jargon").
+JARGON = re.compile(r"\b(IEPs?|504s?|ELLs?|ESL|ESOL|ESAs?|SWD|FES(?:-EO|-UA)?|FTC|OSP|CTE|LEP)\b")
+_JARGON_ASIDE = re.compile(r"\s*[(\[][^)\]]*\b(?:IEPs?|504s?|ELLs?|ESL|ESOL|ESAs?|SWD|FES(?:-EO|-UA)?|FTC|OSP|CTE|LEP)\b[^)\]]*[)\]]")
+
+
+def plain_label(text: str, fallback: str | None = None) -> str:
+    """Short UI text without school-system terms: "Extra help for ADHD (IEP/504)" -> "Extra help for ADHD"."""
+    cleaned = _JARGON_ASIDE.sub("", text or "").strip()
+    if JARGON.search(cleaned) and fallback:
+        return fallback
+    return cleaned or (fallback or text)
 
 
 def _grounded(text: str, result: dict, programs: list[dict] | None = None) -> bool:
