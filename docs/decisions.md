@@ -274,6 +274,14 @@ AgentCore Gateway as MCP tools: `lookup_guide`, `search_programs`, `find_school_
 - The Gateway uses IAM inbound auth. The runtime's role has `bedrock-agentcore:InvokeGateway` on
   this Gateway only, and the MCP client signs every request with SigV4. The Gateway invokes the
   Lambda with its own role; the Lambda can only read OpenSearch and call Titan embeddings.
+- Both sides of each permission are set. The caller side: the runtime role's identity policy
+  allows `InvokeGateway`, and the Gateway's resource-based policy names the runtime role as an
+  allowed caller. The Gateway's own role: its trust policy lets `bedrock-agentcore.amazonaws.com`
+  assume it only from this account *and* from a `greatschools-tools-*` gateway ARN
+  (`aws:SourceArn`, AWS's confused-deputy guidance), and its permissions policy allows invoking
+  the tools Lambda only.
+- The Gateway delivers its application logs to CloudWatch Logs and its traces to X-Ray, like the
+  runtime (decision 026), so tool calls show up in AgentCore Observability.
 - "How I checked this" names the hop: "AgentCore Gateway (MCP) → AWS Lambda → Amazon OpenSearch".
 - A failed Gateway call is recorded in the trace and returned to the model as "the lookup failed",
   never as made-up data.
