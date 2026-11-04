@@ -167,3 +167,21 @@ one no longer offered the program that covers the gap. Now, on an answer turn, c
 time or budget the parent gave unless the answer itself names a new one ("Pickup at 5 works");
 the mode may still change (require to prefer). The prompt says the same, and the eval case
 `answer_keeps_care_time` checks it.
+
+## 022: Show what the agent really did (`trace`)
+
+Judges and parents ask whether this is an agent or a chatbot that writes everything. Every
+response carries a `trace` built by code as each tool returns: which service ran (Claude on
+Bedrock, OpenSearch, Titan embeddings, or plain code), what it found, and how long it took, plus
+the code-only steps (verifying needs, spotting trade-offs, keeping the parent's stated values,
+dropping notes the data doesn't back). The model never writes the trace, so it can't claim a
+check that didn't happen. It's a top-level field, not a block, so existing renderers are unaffected.
+
+## 023: Help parents find what matters
+
+GreatSchools' core problem is that parents don't know what to ask. When a parent gives little
+beyond grade and location ("a good elementary school in Miami") and code found no trade-off,
+the agent still searches, then asks one question about what the child needs, offering the
+likeliest of learning support (IEP or 504), after-school care, a bus, counseling, strong
+academics and small classes. If grade or location is missing it asks for that first and offers
+these as suggested chips. Eval cases `discovery_vague` (English) and `discovery_vague_es` check it.
