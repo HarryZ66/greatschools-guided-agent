@@ -17,3 +17,15 @@ export const QUESTIONS = [
   { id:'dist', q:'How far can you realistically travel to school each day?', options:['Under 3 miles','3–5 miles','5–10 miles','Distance doesn’t matter'] },
 ]
 export const STATUS = { confirmed:'Confirmed', partial:'Partially meets', attention:'Needs attention' }
+// Sample `trace` for the mock search reply, in the shape /api/turn returns (docs/contract.md, section 4).
+// Replace with the real response's trace once the app calls the API.
+export const SAMPLE_TRACE = {
+  elapsed_ms: 8420,
+  steps: [
+    { tool: 'understand', service: 'Claude Sonnet 5.5 on Amazon Bedrock', text: 'Read your message, chose which tools to call (2 model calls) and wrote the reply' },
+    { tool: 'find_schools', service: 'Amazon OpenSearch + Titan Embeddings', ms: 610, text: 'Found 4 candidate schools for middle school near Woodstock, scored by your 2 needs and your own words (vector match)' },
+    { tool: 'verify', service: 'Code (no model)', text: 'Checked 2 needs on 4 schools against the data: 4 confirmed, 2 partial, 2 need attention. Flagged a data problem at 1 school' },
+    { tool: 'trade_offs', service: 'Code (no model)', text: 'Spotted 1 trade-off worth asking you about' },
+    { tool: 'ground', service: 'Code (no model)', text: 'Checked the agent\'s 1 note against the data: 1 kept' },
+  ],
+}

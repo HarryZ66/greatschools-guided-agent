@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import logo from './assets/greatschools-logo.png'
-import { SCHOOLS, QUESTIONS, STATUS } from './data.js'
+import { SCHOOLS, QUESTIONS, STATUS, SAMPLE_TRACE } from './data.js'
 
 const Logo = () => <img className="logo" src={logo} alt="GreatSchools.org" />
 
@@ -66,6 +66,29 @@ function CompareModal({ items, onClose }) {
   )
 }
 
+// "How I checked this": the response's top-level `trace` (docs/contract.md, section 4).
+// Code records each step as it runs, so we show `service` and `text` exactly as given.
+// New `tool` values may appear, so nothing here depends on them.
+export function HowIChecked({ trace }) {
+  const steps = trace?.steps || []
+  if (!steps.length) return null
+  const secs = trace.elapsed_ms != null ? ` · ${(trace.elapsed_ms / 1000).toFixed(1)}s` : ''
+  return (
+    <details className="trace">
+      <summary>How I checked this <span>({steps.length} steps{secs})</span></summary>
+      <ol>
+        {steps.map((s, i) => (
+          <li key={i}>
+            <b>{s.service}</b>
+            <span>{s.text}</span>
+            {s.ms != null && <small>{s.ms} ms</small>}
+          </li>
+        ))}
+      </ol>
+    </details>
+  )
+}
+
 function Chat({ msgs, options, send, free }) {
   const [text, setText] = useState('')
   const box = useRef(null)
@@ -73,7 +96,9 @@ function Chat({ msgs, options, send, free }) {
   return (
     <aside className="chat">
       <div className="msgs" ref={box}>
-        {msgs.map((m, i) => <div key={i} className={'m ' + m.r}>{m.t}</div>)}
+        {msgs.map((m, i) => m.trace
+          ? <div key={i} className="turn"><div className={'m ' + m.r}>{m.t}</div><HowIChecked trace={m.trace} /></div>
+          : <div key={i} className={'m ' + m.r}>{m.t}</div>)}
       </div>
       {options && (
         <div className="choices">
@@ -109,7 +134,8 @@ export default function App() {
     if (busy) return
     setBusy(true)
     setTimeout(() => {
-      setMsgs([{ r: 'ai', t: `I found ${SCHOOLS.length} schools for “${query || 'your search'}”. I checked each one against your criteria. I have a question to help me narrow these down.` }])
+      // When this calls /api/turn, pass the response's `trace` here instead of the sample.
+      setMsgs([{ r: 'ai', t: `I found ${SCHOOLS.length} schools for “${query || 'your search'}”. I checked each one against your criteria. I have a question to help me narrow these down.`, trace: SAMPLE_TRACE }])
       setCur(null); askNext(0, 900)
       setStage('results'); setBusy(false)
     }, 650)

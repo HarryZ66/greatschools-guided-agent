@@ -81,3 +81,13 @@ tbody th{color:var(--mut);font-weight:600;white-space:nowrap}thead th{font-famil
 @media(max-width:800px){.split{flex-direction:column}.list,.chatw{width:100%!important}.bar{display:none}.cmpbar{width:100%!important}
 .thumb{width:84px}.pg-results>header .back{display:none}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.01s!important}}
+/* "How I checked this" (response trace) */
+.turn{display:flex;flex-direction:column;gap:6px;align-self:flex-start;max-width:85%}
+.turn .m{max-width:100%}
+.trace{font-size:13px;color:var(--mut);padding:0 4px}
+.trace summary{cursor:pointer;font-weight:600;color:var(--green);width:fit-content;list-style-position:inside}
+.trace summary span{font-weight:400;color:var(--mut)}
+.trace ol{margin:8px 0 2px;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.trace li b{display:block;color:var(--ink);font-weight:600}
+.trace li small{margin-left:6px;color:var(--mut)}
+.trace li span{line-height:1.4}
