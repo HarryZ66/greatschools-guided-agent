@@ -119,6 +119,11 @@ Saving and feedback skip the agent entirely:
   `terms` (guide entries that explain fields on the page) and `cost`. No model call.
 - `GET /api/metrics`: `{searches, saves, saves_to_searches, thumbs_up, thumbs_down, relevance, criteria_per_search}`
 
+In the deployed app, agent turns, saves and session profiles run on Amazon Bedrock AgentCore Runtime
+(decision 025); the endpoints and payloads above don't change. Internally the runtime serves
+`GET /ping` and `POST /invocations` with `{"op": "turn" | "turn_stream" | "save" | "unsave" | "profile", ...}`;
+errors come back as `{"_error": {status, detail}}` and the API passes them on unchanged.
+
 A `compare` turn returns `criteria_chips` and a `comparison` block (no `school_results`);
 the comparison's `summary` is the agent's one-line take.
 

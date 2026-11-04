@@ -28,7 +28,7 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | Model | Claude Sonnet 5.5 on Bedrock for the agent, with prompt caching; Titan Text Embeddings v2 for semantic search. Haiku 5.5 was evaluated as a cheaper option (see Evaluation) |
 | How agentic | A guided agent. The model picks its tools (school search, school profile, find by name, parent guide, programs), asks at most one question per turn, spots gaps and suggests needs. Code decides every status, score, trade-off and piece of evidence. At most 6 tool calls per turn |
 | Agent framework | Strands Agents |
-| Compute | One ARM64 Fargate task behind an ALB, reached only through CloudFront and AWS WAF |
+| Compute | The agent runs on Amazon Bedrock AgentCore Runtime, one session per conversation (decision 025). The public API is one ARM64 Fargate task behind an ALB, reached only through CloudFront and AWS WAF |
 | Infrastructure as code | AWS CDK (Python) |
 | Frontend | Single-page app served from S3 through CloudFront (a test page until the React app is built) |
 | Scope | Schools, plus library and community programs that fill a school's gaps (decision 010) |
@@ -41,7 +41,8 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | Amazon OpenSearch Service | Keyword and vector search over school documents |
 | Amazon DynamoDB | Session state, saved schools and thumbs up/down feedback |
 | Amazon S3 | Data files and the frontend site |
-| Amazon ECS on AWS Fargate (ARM64) | Runs the agent API container |
+| Amazon Bedrock AgentCore Runtime | Runs the agent: each parent's conversation in its own warm session |
+| Amazon ECS on AWS Fargate (ARM64) | Runs the public API, which passes agent turns to AgentCore Runtime |
 | Elastic Load Balancing (ALB) | Routes traffic to the agent task |
 | Amazon CloudFront | One HTTPS URL: `/api/*` goes to the agent, everything else to the frontend |
 | Amazon ECR | Stores the agent image (created by CDK) |
@@ -51,9 +52,11 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 All resources are in `us-east-1`.
 
 ```
-Browser ──HTTPS──▶ CloudFront ──/api/*──▶ ALB ──▶ Fargate task (FastAPI + Strands agent)
-                       │                               │
-                       └──/*──▶ S3 (frontend)          ├──▶ Bedrock (Claude, Titan embeddings)
+Browser ──HTTPS──▶ CloudFront ──/api/*──▶ ALB ──▶ Fargate task (FastAPI)
+                       │                               │  InvokeAgentRuntime
+                       └──/*──▶ S3 (frontend)          ▼
+                                     AgentCore Runtime session (FastAPI + Strands agent)
+                                                       ├──▶ Bedrock (Claude, Titan embeddings)
                                                        ├──▶ OpenSearch (schools index)
                                                        └──▶ DynamoDB (saves, feedback, metrics)
 ```

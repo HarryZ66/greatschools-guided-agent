@@ -5,10 +5,12 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     Stack,
+    aws_bedrockagentcore as agentcore,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
     aws_dynamodb as dynamodb,
     aws_ec2 as ec2,
+    aws_ecr_assets as ecr_assets,
     aws_ecs as ecs,
     aws_ecs_patterns as ecs_patterns,
     aws_iam as iam,
@@ -49,6 +51,53 @@ class AppStack(Stack):
         log_group = logs.LogGroup(self, "AgentLogs", retention=logs.RetentionDays.TWO_WEEKS,
                                   removal_policy=RemovalPolicy.DESTROY)
 
+        # One image for both the public API (Fargate) and the agent (AgentCore Runtime). Built for
+        # ARM64 whatever machine runs the deploy (both run on Graviton); an x86 laptop would
+        # otherwise build an amd64 image that exits at once (exit code 255, no logs).
+        image = ecr_assets.DockerImageAsset(self, "AgentImage", directory=str(REPO_ROOT / "agent"),
+                                            platform=ecr_assets.Platform.LINUX_ARM64)
+
+        # Agent turns run on Amazon Bedrock AgentCore Runtime (docs/decisions.md, 025): one session
+        # per parent's conversation, paid per use. Public network mode: it reaches Bedrock,
+        # OpenSearch (IAM-signed) and DynamoDB over HTTPS, like the Fargate task.
+        runtime_role = iam.Role(self, "AgentRuntimeRole",
+                                assumed_by=iam.ServicePrincipal(
+                                    "bedrock-agentcore.amazonaws.com",
+                                    conditions={"StringEquals": {"aws:SourceAccount": self.account}}))
+        image.repository.grant_pull(runtime_role)
+        runtime_role.add_to_principal_policy(iam.PolicyStatement(
+            actions=["ecr:GetAuthorizationToken"], resources=["*"]))
+        runtime_role.add_to_principal_policy(iam.PolicyStatement(
+            actions=["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents",
+                     "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
+            resources=[f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/bedrock-agentcore/runtimes/*"]))
+        runtime_role.add_to_principal_policy(iam.PolicyStatement(
+            actions=["xray:PutTraceSegments", "xray:PutTelemetryRecords", "cloudwatch:PutMetricData"],
+            resources=["*"]))
+        runtime = agentcore.CfnRuntime(
+            self, "AgentRuntime",
+            agent_runtime_name="greatschools_guided_agent",
+            description="GreatSchools guided search agent (Strands on Bedrock)",
+            role_arn=runtime_role.role_arn,
+            agent_runtime_artifact=agentcore.CfnRuntime.AgentRuntimeArtifactProperty(
+                container_configuration=agentcore.CfnRuntime.ContainerConfigurationProperty(
+                    container_uri=image.image_uri)),
+            network_configuration=agentcore.CfnRuntime.NetworkConfigurationProperty(network_mode="PUBLIC"),
+            protocol_configuration="HTTP",
+            # A parent may pause to read results: keep the conversation for 30 idle minutes
+            lifecycle_configuration=agentcore.CfnRuntime.LifecycleConfigurationProperty(
+                idle_runtime_session_timeout=1800, max_lifetime=8 * 3600),
+            environment_variables={
+                "PORT": "8080",
+                "RUNNING_ON": "agentcore",
+                "AWS_REGION": self.region,
+                "AWS_DEFAULT_REGION": self.region,
+                "SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}",
+                "TABLE_NAME": table.table_name,
+            },
+        )
+        runtime.node.add_dependency(runtime_role)
+
         # One task: conversations are kept in memory (see agent/gs_agent/api.py).
         service = ecs_patterns.ApplicationLoadBalancedFargateService(
             self, "AgentService",
@@ -64,7 +113,7 @@ class AppStack(Stack):
             runtime_platform=ecs.RuntimePlatform(cpu_architecture=ecs.CpuArchitecture.ARM64,
                                                  operating_system_family=ecs.OperatingSystemFamily.LINUX),
             task_image_options=ecs_patterns.ApplicationLoadBalancedTaskImageOptions(
-                image=ecs.ContainerImage.from_asset(str(REPO_ROOT / "agent")),
+                image=ecs.ContainerImage.from_docker_image_asset(image),
                 container_port=8000,
                 log_driver=ecs.LogDrivers.aws_logs(stream_prefix="agent", log_group=log_group),
                 environment={
@@ -72,6 +121,7 @@ class AppStack(Stack):
                     "AWS_DEFAULT_REGION": self.region,
                     "SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}",
                     "TABLE_NAME": table.table_name,
+                    "AGENT_RUNTIME_ARN": runtime.attr_agent_runtime_arn,
                 },
             ),
             idle_timeout=Duration.seconds(120),
@@ -83,14 +133,23 @@ class AppStack(Stack):
         service.target_group.set_attribute("deregistration_delay.timeout_seconds", "10")
 
         task_role = service.task_definition.task_role
-        domain.grant_read_write(task_role)
-        table.grant_read_write_data(task_role)
+        # The API reads schools and writes saves itself; the agent's model calls run on the runtime.
+        # Both keep Bedrock access so the API still works alone (AGENT_RUNTIME_ARN unset).
+        for role in (task_role, runtime_role):
+            domain.grant_read_write(role)
+            table.grant_read_write_data(role)
+            role.add_to_principal_policy(iam.PolicyStatement(
+                actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+                resources=[
+                    "arn:aws:bedrock:*::foundation-model/*",  # cross-region profiles route to several regions
+                    f"arn:aws:bedrock:{self.region}:{self.account}:inference-profile/*",
+                ],
+            ))
+        # AgentCore checks the role can pull the image when the runtime is created
+        runtime.node.add_dependency(runtime_role.node.find_child("DefaultPolicy"))
         task_role.add_to_principal_policy(iam.PolicyStatement(
-            actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-            resources=[
-                "arn:aws:bedrock:*::foundation-model/*",  # cross-region profiles route to several regions
-                f"arn:aws:bedrock:{self.region}:{self.account}:inference-profile/*",
-            ],
+            actions=["bedrock-agentcore:InvokeAgentRuntime"],
+            resources=[runtime.attr_agent_runtime_arn, f"{runtime.attr_agent_runtime_arn}/*"],
         ))
 
         # Frontend: built app if it exists, otherwise a placeholder page.
@@ -162,4 +221,5 @@ class AppStack(Stack):
 
         CfnOutput(self, "AppUrl", value=f"https://{distribution.distribution_domain_name}")
         CfnOutput(self, "ApiUrl", value=f"https://{distribution.distribution_domain_name}/api")
+        CfnOutput(self, "AgentRuntimeArn", value=runtime.attr_agent_runtime_arn)
         CfnOutput(self, "LoadBalancerUrl", value=f"http://{service.load_balancer.load_balancer_dns_name}")

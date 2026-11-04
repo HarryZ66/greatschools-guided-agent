@@ -205,3 +205,27 @@ distances in kilometres. The Vision doc lists "don't know the jargon" as a core 
   out of eight told us little; a vote on the reply rates the whole answer, results and question
   included. `/api/feedback` takes the reply's `turn` (new top-level field on every response) or a
   `school_id` as before, so `relevance` in `/api/metrics` keeps working.
+
+## 025: Agent turns run on Amazon Bedrock AgentCore Runtime
+
+Until now the agent ran inside the API process on one Fargate task, with conversations in memory.
+That works for a demo but can't scale out: a second task wouldn't know the first one's
+conversations. AgentCore Runtime fixes this the way agents are meant to be hosted on AWS: each
+session gets its own isolated, warm environment, kept between turns, paid per use.
+
+- The same ARM64 image runs in both places. On AgentCore (`RUNNING_ON=agentcore`, port 8080) the
+  app also serves AgentCore's service contract: `GET /ping` and `POST /invocations`.
+- The Fargate API stays the public front door behind CloudFront and WAF. With `AGENT_RUNTIME_ARN`
+  set, it sends agent turns (`/api/turn`, `/api/turn/stream`) and the calls that need the
+  conversation's needs (`POST`/`DELETE /api/saved`, `/api/schools/{id}?session_id=…`) to
+  `InvokeAgentRuntime`, with the AgentCore session id `greatschools-guided-search-session-<session_id>`.
+  The API names new conversations so the first turn already has a session. Streamed turns pass
+  AgentCore's server-sent events through unchanged. Feedback, saved-list reads, school details
+  without a session, and metrics stay on the API: they need no conversation state.
+- Sessions stay warm for 30 idle minutes (8 hours at most); after that a parent's next turn starts
+  a new conversation, and saved schools still come back from DynamoDB.
+- The browser can't call AgentCore directly (it needs SigV4 or a JWT), which is why the API proxies.
+  The API and the frontend contract don't change.
+- "How I checked this" gains a first step, "Amazon Bedrock AgentCore Runtime", recorded by code on
+  the runtime, so a parent (and a judge) can see where the turn ran.
+- Without `AGENT_RUNTIME_ARN` (local runs, tests) everything runs in-process as before.
