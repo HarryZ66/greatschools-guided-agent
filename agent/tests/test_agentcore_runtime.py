@@ -63,6 +63,29 @@ def test_streamed_turns_pass_through(monkeypatch):
     assert fake.calls[0]["payload"]["op"] == "turn_stream"
 
 
+def test_new_search_uses_the_existing_runtime_session_and_keeps_saves(monkeypatch):
+    answer = {"session_id": "parent-1", "blocks": [],
+              "saved": [{"school_id": "fl-1", "name": "Tamarind Cove", "at": "t"}]}
+    fake = _use_runtime(monkeypatch, answer)
+    client = TestClient(api.app)
+    response = client.post("/api/turn", json={
+        "session_id": "parent-1", "event": {"type": "new_search"},
+    })
+    assert response.status_code == 200 and response.json() == answer
+    call = fake.calls[0]
+    assert call["runtimeSessionId"] == rc.runtime_session_id("parent-1")
+    assert call["payload"]["request"]["event"] == {"type": "new_search"}
+
+    events = [f"event: result\ndata: {json.dumps({'type': 'result', 'response': answer})}\n\n".encode()]
+    fake = _use_runtime(monkeypatch, events)
+    response = client.post("/api/turn/stream", json={
+        "session_id": "parent-1", "event": {"type": "new_search"},
+    })
+    assert response.text == b"".join(events).decode()
+    assert fake.calls[0]["runtimeSessionId"] == rc.runtime_session_id("parent-1")
+    assert fake.calls[0]["payload"]["op"] == "turn_stream"
+
+
 def test_saves_and_profiles_use_the_conversation_on_the_runtime(monkeypatch):
     fake = _use_runtime(monkeypatch, {"saved": [], "programs": []})
     client = TestClient(api.app)

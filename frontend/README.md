@@ -26,7 +26,8 @@ Compare modal.
     highlighted; × sends a `chip_edit` remove (not offered for grade level and location). Unmapped
     wishes show greyed; suggested needs sit under "Also worth checking?" as "+" chips that send a
     `chip_edit` with mode `prefer`.
-  - `school_results`: compact cards: a small rank badge, "% fit", a heart to save, and one line per
+  - `school_results`: compact cards: a small rank badge, "3 of 4 confirmed" (counted from the
+    criteria below, amber with "⚠ check data" when the school has `quality_flags`), a heart to save, and one line per
     criterion with its status (Yes / Partly / Watch out / Not known) and the plain-language note.
     Then "Good to know" (`watch_out`), cost (after-aid amounts always marked as estimates), "See
     details and reviews" and Compare. A turn without results keeps the current cards.
