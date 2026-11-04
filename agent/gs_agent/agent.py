@@ -447,7 +447,25 @@ class GuidedSession:
                 "what the real difference is for my family. No question unless a choice really depends on it.")
         if kind == "chip_edit":
             return self._chip_edit(event)
+        if kind == "new_search":
+            return self._new_search()
         raise ValueError(f"Unknown event type: {kind}")
+
+    def _new_search(self) -> dict:
+        """Start over with the same parent: forget the conversation, keep the session and saved list.
+
+        The app stores session_id in the browser, so a parent's list survives a page refresh and a
+        "New search" (login is out of scope; the session id stands in for the signed-in parent).
+        """
+        self.needs, self.semantic_query, self.last = [], None, None
+        self.pending_question, self.comparison, self.chip_labels = None, None, {}
+        self.seen_ids, self.seen_content, self.seen_programs = set(), {}, set()
+        self.last_programs, self.programs_fresh = None, False
+        self.unmapped, self.suggestions = [], []
+        self._needs_recap_pending = False
+        self.agent = self._new_agent()
+        self._step("new_search", "Code (no model)", "Started a new search; your saved list is kept")
+        return {"session_id": self.session_id, "blocks": []}
 
     def _agent_turn(self, text: str) -> dict:
         self._drop_old_thinking()

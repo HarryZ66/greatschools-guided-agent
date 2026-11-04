@@ -185,3 +185,11 @@ the agent still searches, then asks one question about what the child needs, off
 likeliest of learning support (IEP or 504), after-school care, a bus, counseling, strong
 academics and small classes. If grade or location is missing it asks for that first and offers
 these as suggested chips. Eval cases `discovery_vague` (English) and `discovery_vague_es` check it.
+
+## 025: The saved list outlives a refresh and a new search
+
+The Vision doc ends the core journey with "save schools to a list", and login is out of scope
+("assume the user is signed in"). The session id stands in for the signed-in parent: the app keeps
+it in `localStorage` and loads `GET /api/saved` on start. A `new_search` event forgets the
+conversation (needs, results, chat history) but keeps the session id and its saves, so starting
+over never empties My list. Saves are in DynamoDB, so they also survive a server restart.

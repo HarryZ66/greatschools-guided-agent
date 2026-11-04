@@ -90,8 +90,16 @@ Event types:
 | `answer` | `question_id`, `option_id` or `text` | Yes |
 | `compare` | `school_ids` (2) | Yes |
 | `chip_edit` | `need`, `mode` (require/prefer/avoid) or `removed: true` | No: code re-runs search and verify |
+| `new_search` | none | No: forgets the conversation, keeps the session and its saved list; the response adds `saved` |
 
 Omit `session_id` on the first turn; every response returns the `session_id` to send next time.
+
+**Remembering the parent's list** (login is out of scope, so the session id stands in for the
+signed-in parent): store `session_id` in `localStorage`. On page load, if one is stored, call
+`GET /api/saved?session_id=…` to show My list, and send it with the next turn. It works after a
+server restart too, because saves live in DynamoDB. For "New search", send
+`{"session_id": <stored>, "event": {"type": "new_search"}}` instead of dropping the id; the
+response is `{"session_id", "blocks": [], "saved": [...], "trace": ...}`.
 
 `POST /api/turn/stream` takes the same body and answers with server-sent events: zero or more
 `progress` events (`{"type": "progress", "text": "Checked 10 schools; ranking the top 8."}`), then

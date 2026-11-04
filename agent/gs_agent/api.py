@@ -61,7 +61,7 @@ def _session(session_id: str | None) -> GuidedSession:
 
 
 class Event(BaseModel):
-    type: Literal["query", "answer", "compare", "chip_edit"]
+    type: Literal["query", "answer", "compare", "chip_edit", "new_search"]
     text: str | None = None
     question_id: str | None = None
     option_id: str | None = None
@@ -107,6 +107,12 @@ def _run_turn(session: GuidedSession, event: Event) -> dict:
             store.record_search(session.session_id, len(session.needs), len(session.last["results"]))
         except Exception:
             log.exception("could not record search metric")
+    if event.type == "new_search":  # the app shows the kept list right away
+        try:
+            response["saved"] = store.saved_schools(session.session_id)
+        except Exception:
+            log.exception("could not load saved schools for %s", session.session_id)
+            response["saved"] = [{"school_id": i, "name": None, "at": None} for i in sorted(session.saved)]
     response["elapsed_ms"] = int((time.time() - started) * 1000)
     log.info("turn %s %s %dms", session.session_id, event.type, response["elapsed_ms"])
     return response
