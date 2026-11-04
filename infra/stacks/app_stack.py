@@ -125,7 +125,9 @@ class AppStack(Stack):
             environment={"SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}"},
             log_group=logs.LogGroup(self, "GatewayToolsLogs", retention=logs.RetentionDays.TWO_WEEKS,
                                     removal_policy=RemovalPolicy.DESTROY))
-        domain.grant_read(tools_fn)
+        # Read-only, but searches are POSTs (grant_read only allows GET and HEAD)
+        tools_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["es:ESHttpGet", "es:ESHttpHead", "es:ESHttpPost"], resources=[f"{domain.domain_arn}/*"]))
         tools_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],  # Titan embeddings for the guide and program searches
             resources=[f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-embed-text-v2:0"]))
