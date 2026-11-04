@@ -118,8 +118,19 @@ check("DELETE /api/saved/{id}", code == 200 and not r.get("saved"), "", t)
 # Feedback, profile, metrics
 t = time.time(); code, r = call("POST", "/api/feedback", {"session_id": sid, "school_id": target, "vote": "up"})
 check("POST /api/feedback", code == 200 and r.get("ok"), "", t)
-t = time.time(); code, r = call("GET", f"/api/schools/{target}")
-check("GET /api/schools/{id} (P3)", code == 200 and r.get("name") and "profile_vector" not in r, r.get("name", ""), t)
+t = time.time(); code, r = call("GET", f"/api/schools/{target}?session_id={sid}")
+prof = r.get("profile", {})
+check("GET /api/schools/{id} (P3)", code == 200 and r.get("name") and "profile_vector" not in r
+      and prof.get("criteria") and prof.get("terms") and "cost" in prof,
+      f"{r.get('name', '')}: {len(prof.get('criteria', []))} checks, {len(prof.get('terms', []))} guide terms", t)
+
+# Saving a school with a care gap suggests a program that covers it (Tamarind Cove: care ends at 5)
+tamarind = next((s["school_id"] for s in schools if s["name"].startswith("Tamarind Cove")), None)
+if tamarind:
+    t = time.time(); code, r = call("POST", "/api/saved", {"session_id": sid, "school_id": tamarind})
+    check("POST /api/saved suggests gap programs", code == 200 and r.get("programs"),
+          (r.get("programs") or [{}])[0].get("why", "no programs")[:100], t)
+    call("DELETE", f"/api/saved/{tamarind}?session_id={sid}")
 t = time.time(); code, r = call("GET", "/api/metrics")
 check("GET /api/metrics", code == 200 and r.get("searches", 0) > 0 and "saves_to_searches" in r,
       f"saves/searches {r.get('saves_to_searches')}, relevance {r.get('relevance')}, criteria/search {r.get('criteria_per_search')}", t)

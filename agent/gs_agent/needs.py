@@ -8,6 +8,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from . import funding
 from .config import FIELD_STALE_DAYS, REVIEW_STALE_DAYS, TODAY
 
 CONFIRMED, PARTIAL, ATTENTION, MISSING = "confirmed", "partial", "needs_attention", "missing"
@@ -27,6 +28,7 @@ CATALOG: dict[str, dict[str, str]] = {
     "ell_support": {"label": "English learner support", "value": "none"},
     "safety": {"label": "Safe, low bullying", "value": "none. Means the parent wants a safe school; use require or prefer, never avoid"},
     "attendance": {"label": "Good attendance", "value": "none"},
+    "mental_health": {"label": "Counseling and mental health support", "value": "none"},
     "arts": {"label": "Arts", "value": "none"},
     "sports": {"label": "Sports", "value": "none"},
     "college_prep": {"label": "College prep", "value": "none"},
@@ -274,6 +276,28 @@ def v_safety(school: dict, value: Any) -> dict:
     return _result("safety", CONFIRMED, ev)
 
 
+MENTAL_HEALTH_STAFF = {"school_counselors", "social_workers", "mental_health_specialists"}
+
+
+def v_mental_health(school: dict, value: Any) -> dict:
+    """Counselors or specialists on the school's profile, plus what recent reviews say."""
+    listed = osp(school, "mental_health")
+    staff = [v for v in listed if v in MENTAL_HEALTH_STAFF]
+    t = review_topic(school, "Mental Health")
+    ev = [_ev("osp.mental_health", listed, school.get("osp_as_of"))] if listed else []
+    if t["recent_pos"] or t["recent_neg"]:
+        ev.append(_ev("reviews: Mental Health", f"{t['recent_pos']} positive, {t['recent_neg']} negative (recent)"))
+    if staff and not _profile_stale(school):
+        return _result("mental_health", CONFIRMED, ev, "School-reported counseling staff.")
+    if t["recent_neg"] > t["recent_pos"]:
+        return _result("mental_health", ATTENTION, ev, "Recent reviews say counseling support is lacking.")
+    if staff:
+        return _result("mental_health", PARTIAL, ev, f"Counseling staff listed in {school['osp_as_of'][:7]}; confirm it's current.")
+    if listed or t["recent_pos"]:
+        return _result("mental_health", PARTIAL, ev, "Some support listed or praised, but no counselors listed.")
+    return _result("mental_health", MISSING, ev, "No counseling information. Ask the school.")
+
+
 def v_attendance(school: dict, value: Any) -> dict:
     result = _tier_check(school, "attendance", "high_attendance", {"good"}, {"concerning"}, {"poor"})
     if school.get("attendance_rate") is not None:
@@ -312,9 +336,18 @@ def v_cost(school: dict, value: Any) -> dict:
     if tuition is None:
         return _result("cost", MISSING, [_ev("entity_type", kind)], "Private school; tuition not listed.")
     ev = [_ev("tuition", tuition)]
-    if value is None or tuition > value:
+    if value is not None and tuition <= value:
+        return _result("cost", CONFIRMED, ev)
+    # Over budget (or the parent wants free schools): show what a typical scholarship would leave.
+    cost = funding.cost_summary(school)
+    if "after_aid_estimate" not in cost:
         return _result("cost", ATTENTION, ev, f"Tuition is about ${tuition:,}/year.")
-    return _result("cost", CONFIRMED, ev)
+    after = cost["after_aid_estimate"]
+    ev.append(_ev(f"funding.{cost['aid'][0]}.typical_amount", cost["aid_typical_amount"], cost["aid_as_of"]))
+    note = (f"Tuition is about ${tuition:,}/year; about ${after:,} after a typical Florida scholarship "
+            f"(estimate from the {cost['aid_as_of']} average).")
+    fits = value is not None and after <= value
+    return _result("cost", PARTIAL if fits else ATTENTION, ev, note)
 
 
 RULES: dict[str, Callable[[dict, Any], dict]] = {
@@ -331,6 +364,7 @@ RULES: dict[str, Callable[[dict, Any], dict]] = {
     "ell_support": v_ell_support,
     "safety": v_safety,
     "attendance": v_attendance,
+    "mental_health": v_mental_health,
     "arts": _osp_any("arts", ["arts_visual", "arts_music", "arts_performing_written"], "arts programs"),
     "sports": _osp_any("sports", ["boys_sports", "girls_sports"], "sports"),
     "college_prep": v_college_prep,

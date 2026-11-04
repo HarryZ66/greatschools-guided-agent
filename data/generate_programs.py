@@ -57,6 +57,11 @@ TEMPLATES = [
     ("Youth Soccer Clinic", ["Sports", "Soccer", "After School"], (6, 13), ["e", "m"], ["Mon", "Wed"], ("17:00", "18:30"), "$25 per season",
      "Skills and games with certified coaches at the park next to the center."),
 ]
+# Added after the first generation, so existing programs keep their ids
+LATE_TEMPLATES = [
+    ("Teen Support Circle", ["Counseling", "Teen Support", "Mental Health"], (11, 17), ["m", "h"], ["Wed"], ("16:30", "17:30"), "Free",
+     "A small weekly group led by a licensed counselor where teens talk about stress, friendships and school. Confidential and free."),
+]
 
 
 class ProgramGenerator:
@@ -177,6 +182,9 @@ def main() -> None:
         template = gen.rng.choice(TEMPLATES)
         weeks = (-4, gen.rng.choice([-1, 6, 8, 10])) if gen.rng.random() < 0.15 else (-2, gen.rng.choice([6, 8, 10]))
         programs.append(gen.program(city, library, template, weeks=weeks))
+    # Counseling groups in a few cities, one near the demo schools in Miami
+    for city in ("Miami", "Hialeah", "Doral", "Fort Lauderdale"):
+        programs.append(gen.program(city, LIBRARIES[city][0], LATE_TEMPLATES[0]))
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(programs, indent=1))

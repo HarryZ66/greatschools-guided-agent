@@ -94,6 +94,9 @@ How you work:
    the most important hint, naming the school and the trade-off, e.g. "Tamarind Cove has the STEM
    program you want, but care ends at 5pm. Could someone pick him up at 5, or do you need 6?".
    Otherwise ask only if the answer would clearly change the ranking (e.g. cost: free vs private).
+   If private schools fall short only on cost and a result's cost has an after_aid_estimate, the
+   question may offer to include schools a Florida scholarship could help pay for. Always call that
+   figure an estimate, based on a typical award; for details, lookup_content has the guide entries.
    If a program you found could cover the gap, still ask: name the school and the program, and let
    the parent choose (e.g. "Tamarind Cove's care ends at 5pm. Would the library robotics club from
    5 to 6:30 work, or do you need care at the school until 6?"). Only the parent can decide that.
@@ -111,8 +114,10 @@ How you work:
    that yet and suggest asking the school or district; don't explain it from memory.
 8. Spot gaps. If the parent wants something the catalog can't check, put it in unmapped and say
    plainly that we can't check it yet. Suggest at most 2 needs they didn't mention but probably care
-   about (a parent who works until 6pm may need a bus). Never search with a suggested need until
-   they add it.
+   about (a parent who works until 6pm may need a bus). GreatSchools says counseling and mental
+   health support is now a top concern that parents rarely ask about: unless the parent already
+   mentioned it, mental_health is a good suggestion, with a why like "Many parents now ask about
+   counseling support." Never search with a suggested need until they add it.
 You have at most {max_tools} tool calls per turn.
 
 Honesty rules:
@@ -510,8 +515,8 @@ class GuidedSession:
 
         if results:
             blocks.append({"type": "school_results", "results": [
-                {**{k: r[k] for k in ("school_id", "name", "entity_type", "city", "rank", "score", "criteria",
-                                       "watch_out", "quality_flags")},
+                {**{k: r.get(k) for k in ("school_id", "name", "entity_type", "city", "rank", "score", "criteria",
+                                           "watch_out", "quality_flags", "cost")},
                  "saved": r["school_id"] in self.saved}
                 for r in results]})
         return {"session_id": self.session_id, "blocks": blocks}
@@ -528,7 +533,7 @@ def _grounded(text: str, result: dict, programs: list[dict] | None = None) -> bo
     own sentence from adding numbers the data doesn't contain. Based on Sanchit's PR #1.
     """
     facts = json.dumps({"criteria": result["criteria"], "flags": result["quality_flags"], "name": result["name"],
-                        "programs": programs or []})
+                        "cost": result.get("cost"), "programs": programs or []})
     known = set(_NUMBER.findall(facts))
     known |= {d[:4] for d in re.findall(r"\d{4}-\d{2}", facts)}  # "2023" from "2023-05-01"
     known |= {d[:7] for d in re.findall(r"\d{4}-\d{2}", facts)}
@@ -556,5 +561,6 @@ def _compact(found: dict) -> dict:
                                                   for e in c["evidence"]]}
                          for c in r["criteria"]},
             "data_quality": [f["note"] for f in r["quality_flags"]],
+            "cost": r.get("cost"),
         } for r in found["results"]],
     }

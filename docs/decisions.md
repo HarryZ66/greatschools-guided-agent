@@ -119,6 +119,38 @@ from OpenSearch with sources. Its five extra topics (microschools, chronic absen
 tax-credit scholarships) were added to `data/content/guide.json`. PR #1 also proposed leaving
 programs out of scope; we kept them (decision 010) because the Vision doc lists program cards in scope.
 
+## 017: Counseling and mental health as a need (Sanchit's next-steps, GreatSchools feedback)
+
+GreatSchools told us mental health is now a top-five parent concern that parents rarely ask about.
+`mental_health` is confirmed when the profile lists counselors, social workers or specialists and
+isn't stale; partial when only reviews or older listings support it; needs attention when recent
+reviews are mostly negative. The prompt offers it as a suggested need when the parent hasn't
+raised it: the demo query suggested it in 5 of 5 runs.
+
+## 018: Cost after a typical scholarship
+
+Parents with less money rule out private schools without knowing aid exists. For private schools
+with listed tuition, code subtracts the Florida scholarship's average award and shows "about
+$8,300 after a typical Florida scholarship (estimate from the 2024-25 average)". The figure is the
+FLDOE's latest published statewide average ($8,200, 2024-25); income limits were removed in 2023-24.
+We don't claim a priority tier or a 2026-27 amount we couldn't confirm from an official source.
+The federal tax-credit scholarship (2027) is listed with no amounts: "details pending".
+
+## 019: Verified profile view (P3)
+
+`GET /api/schools/{id}?session_id=` adds a `profile` built in code: the same checks as the cards
+for that parent's needs, review counts by topic split recent/older with dated excerpts, guide
+entries for the terms on the page, and the cost estimate. The raw record stays at the top level so
+existing callers keep working.
+
+## 020: Programs offered when a parent saves a school
+
+GreatSchools reps liked programs as a companion to schools. Programs still appear in search turns
+when they fill a time gap (decision 010); in addition, saving a school returns up to 3 programs
+within 8 km that cover a need that school doesn't fully meet, with a `why` written by code
+("Care at Tamarind Cove ends at 5:00 PM. After-School Homework Help … runs until 6:00 PM, 1.0 km
+away"). A care gap is only filled by a program whose session covers the whole gap.
+
 ## 004: Models
 
 - Main agent: Claude Sonnet 5.5 on Bedrock (`us.anthropic.claude-sonnet-5-5`)
