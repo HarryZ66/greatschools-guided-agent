@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from aws_cdk import (
@@ -8,6 +9,7 @@ from aws_cdk import (
     aws_bedrockagentcore as agentcore,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
+    aws_cognito as cognito,
     aws_dynamodb as dynamodb,
     aws_ec2 as ec2,
     aws_ecr_assets as ecr_assets,
@@ -18,7 +20,9 @@ from aws_cdk import (
     aws_opensearchservice as opensearch,
     aws_s3 as s3,
     aws_s3_deployment as s3deploy,
+    aws_secretsmanager as secretsmanager,
     aws_wafv2 as wafv2,
+    aws_xray as xray,
 )
 from constructs import Construct
 
@@ -72,8 +76,33 @@ class AppStack(Stack):
                      "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
             resources=[f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/bedrock-agentcore/runtimes/*"]))
         runtime_role.add_to_principal_policy(iam.PolicyStatement(
-            actions=["xray:PutTraceSegments", "xray:PutTelemetryRecords", "cloudwatch:PutMetricData"],
+            actions=["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules",
+                     "xray:GetSamplingTargets", "cloudwatch:PutMetricData"],
             resources=["*"]))
+
+        # Front door (decision 026): the runtime accepts only OAuth access tokens issued by this
+        # Cognito user pool to the API's app client (inbound auth through AgentCore Identity).
+        # Machine-to-machine: the API gets tokens with the client-credentials grant; no parent signs in.
+        user_pool = cognito.UserPool(self, "AgentUserPool", self_sign_up_enabled=False,
+                                     removal_policy=RemovalPolicy.DESTROY)
+        invoke_scope = cognito.ResourceServerScope(scope_name="invoke", scope_description="Call the agent runtime")
+        resource_server = user_pool.add_resource_server(
+            "AgentResourceServer", identifier="greatschools-agent", scopes=[invoke_scope])
+        token_domain = user_pool.add_domain("AgentTokenDomain", cognito_domain=cognito.CognitoDomainOptions(
+            domain_prefix=f"greatschools-agent-{self.account}"))
+        api_client = user_pool.add_client(
+            "ApiClient", generate_secret=True,
+            o_auth=cognito.OAuthSettings(
+                flows=cognito.OAuthFlows(client_credentials=True),
+                scopes=[cognito.OAuthScope.resource_server(resource_server, invoke_scope)]),
+            access_token_validity=Duration.minutes(60))
+        # Handed to the API task as an ECS secret, never as a plain environment variable
+        api_client_secret = secretsmanager.Secret(
+            self, "ApiClientSecret", description="Cognito client secret the API uses to call the agent runtime",
+            secret_string_value=api_client.user_pool_client_secret, removal_policy=RemovalPolicy.DESTROY)
+        discovery_url = (f"https://cognito-idp.{self.region}.amazonaws.com/{user_pool.user_pool_id}"
+                         "/.well-known/openid-configuration")
+
         runtime = agentcore.CfnRuntime(
             self, "AgentRuntime",
             agent_runtime_name="greatschools_guided_agent",
@@ -84,6 +113,10 @@ class AppStack(Stack):
                     container_uri=image.image_uri)),
             network_configuration=agentcore.CfnRuntime.NetworkConfigurationProperty(network_mode="PUBLIC"),
             protocol_configuration="HTTP",
+            # Calls without a valid token from this pool and client are rejected (and SigV4 calls too)
+            authorizer_configuration=agentcore.CfnRuntime.AuthorizerConfigurationProperty(
+                custom_jwt_authorizer=agentcore.CfnRuntime.CustomJWTAuthorizerConfigurationProperty(
+                    discovery_url=discovery_url, allowed_clients=[api_client.user_pool_client_id])),
             # A parent may pause to read results: keep the conversation for 30 idle minutes
             lifecycle_configuration=agentcore.CfnRuntime.LifecycleConfigurationProperty(
                 idle_runtime_session_timeout=1800, max_lifetime=8 * 3600),
@@ -98,7 +131,44 @@ class AppStack(Stack):
         )
         runtime.node.add_dependency(runtime_role)
 
-        # One task: conversations are kept in memory (see agent/gs_agent/api.py).
+        # AgentCore Observability (decision 026). CloudWatch Transaction Search stores X-Ray spans
+        # in CloudWatch Logs, where the GenAI Observability dashboard reads them. The agent sends its
+        # own spans (ADOT, see agent/Dockerfile); the runtime also delivers its logs and traces.
+        # Transaction Search is an account setting: deleting this stack turns it back off.
+        xray_policy = logs.CfnResourcePolicy(
+            self, "TransactionSearchLogsPolicy", policy_name="greatschools-transaction-search",
+            policy_document=json.dumps({"Version": "2012-10-17", "Statement": [{
+                "Sid": "TransactionSearchXRayAccess", "Effect": "Allow",
+                "Principal": {"Service": "xray.amazonaws.com"}, "Action": "logs:PutLogEvents",
+                "Resource": [f"arn:aws:logs:{self.region}:{self.account}:log-group:aws/spans:*",
+                             f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/application-signals/data:*"],
+                "Condition": {"ArnLike": {"aws:SourceArn": f"arn:aws:xray:{self.region}:{self.account}:*"},
+                              "StringEquals": {"aws:SourceAccount": self.account}}}]}))
+        # Index every span: a demo sends few, and partial sampling would hide some turns
+        transaction_search = xray.CfnTransactionSearchConfig(self, "TransactionSearch", indexing_percentage=100)
+        transaction_search.add_dependency(xray_policy)
+
+        runtime_app_logs = logs.LogGroup(self, "AgentRuntimeAppLogs", retention=logs.RetentionDays.TWO_WEEKS,
+                                         removal_policy=RemovalPolicy.DESTROY)
+        for log_type, destination in (
+            ("APPLICATION_LOGS", logs.CfnDeliveryDestination(
+                self, "RuntimeLogsDestination", name="greatschools-runtime-logs",
+                delivery_destination_type="CWL", destination_resource_arn=runtime_app_logs.log_group_arn)),
+            ("TRACES", logs.CfnDeliveryDestination(
+                self, "RuntimeTracesDestination", name="greatschools-runtime-traces",
+                delivery_destination_type="XRAY")),
+        ):
+            source = logs.CfnDeliverySource(
+                self, f"Runtime{log_type.title().replace('_', '')}Source",
+                name=f"greatschools-runtime-{log_type.lower().replace('_', '-')}",
+                log_type=log_type, resource_arn=runtime.attr_agent_runtime_arn)
+            delivery = logs.CfnDelivery(self, f"Runtime{log_type.title().replace('_', '')}Delivery",
+                                        delivery_source_name=source.name,
+                                        delivery_destination_arn=destination.attr_arn)
+            delivery.add_dependency(source)
+            delivery.add_dependency(transaction_search)
+
+        # One task: conversations live on AgentCore Runtime (see agent/gs_agent/api.py).
         service = ecs_patterns.ApplicationLoadBalancedFargateService(
             self, "AgentService",
             cluster=cluster,
@@ -122,7 +192,11 @@ class AppStack(Stack):
                     "SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}",
                     "TABLE_NAME": table.table_name,
                     "AGENT_RUNTIME_ARN": runtime.attr_agent_runtime_arn,
+                    "OAUTH_TOKEN_URL": f"{token_domain.base_url()}/oauth2/token",
+                    "OAUTH_CLIENT_ID": api_client.user_pool_client_id,
+                    "OAUTH_SCOPE": f"{resource_server.user_pool_resource_server_id}/{invoke_scope.scope_name}",
                 },
+                secrets={"OAUTH_CLIENT_SECRET": ecs.Secret.from_secrets_manager(api_client_secret)},
             ),
             idle_timeout=Duration.seconds(120),
             circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
@@ -147,10 +221,6 @@ class AppStack(Stack):
             ))
         # AgentCore checks the role can pull the image when the runtime is created
         runtime.node.add_dependency(runtime_role.node.find_child("DefaultPolicy"))
-        task_role.add_to_principal_policy(iam.PolicyStatement(
-            actions=["bedrock-agentcore:InvokeAgentRuntime"],
-            resources=[runtime.attr_agent_runtime_arn, f"{runtime.attr_agent_runtime_arn}/*"],
-        ))
 
         # Frontend: built app if it exists, otherwise a placeholder page.
         site_bucket = s3.Bucket(self, "SiteBucket", block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
@@ -222,4 +292,9 @@ class AppStack(Stack):
         CfnOutput(self, "AppUrl", value=f"https://{distribution.distribution_domain_name}")
         CfnOutput(self, "ApiUrl", value=f"https://{distribution.distribution_domain_name}/api")
         CfnOutput(self, "AgentRuntimeArn", value=runtime.attr_agent_runtime_arn)
+        # For agent/scripts/check_front_door.py (no secrets: the client secret stays in Secrets Manager)
+        CfnOutput(self, "OAuthTokenUrl", value=f"{token_domain.base_url()}/oauth2/token")
+        CfnOutput(self, "OAuthClientId", value=api_client.user_pool_client_id)
+        CfnOutput(self, "OAuthScope", value=f"{resource_server.user_pool_resource_server_id}/{invoke_scope.scope_name}")
+        CfnOutput(self, "OAuthClientSecretArn", value=api_client_secret.secret_arn)
         CfnOutput(self, "LoadBalancerUrl", value=f"http://{service.load_balancer.load_balancer_dns_name}")

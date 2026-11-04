@@ -47,7 +47,9 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | Amazon CloudFront | One HTTPS URL: `/api/*` goes to the agent, everything else to the frontend |
 | Amazon ECR | Stores the agent image (created by CDK) |
 | AWS WAF | Rate limit on agent turns and IP reputation blocking at CloudFront |
-| Amazon CloudWatch | Container logs (14 days) and WAF metrics |
+| Amazon Cognito + AgentCore Identity | OAuth front door on the agent runtime: only the API's access tokens get in (decision 026) |
+| AWS Secrets Manager | The API's OAuth client secret |
+| Amazon CloudWatch | Container logs (14 days), WAF metrics, and AgentCore Observability: agent traces, spans and logs through Transaction Search |
 
 All resources are in `us-east-1`.
 
@@ -170,6 +172,7 @@ Other tests:
 ```bash
 cd agent && ../.venv/bin/pytest -q tests                  # 60 unit tests of verify rules, hints, programs, query building, fallback, cost, profile, trace (no AWS needed)
 python3 evals/smoke_api.py https://<cloudfront-domain>    # 26 end-to-end API checks against a deployment, including streaming
+python3 agent/scripts/check_front_door.py                # the agent runtime rejects calls without an OAuth token
 ```
 
 Before a demo, clear test traffic from `/api/metrics`:

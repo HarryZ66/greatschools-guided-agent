@@ -229,3 +229,29 @@ session gets its own isolated, warm environment, kept between turns, paid per us
 - "How I checked this" gains a first step, "Amazon Bedrock AgentCore Runtime", recorded by code on
   the runtime, so a parent (and a judge) can see where the turn ran.
 - Without `AGENT_RUNTIME_ARN` (local runs, tests) everything runs in-process as before.
+
+## 026: OAuth on the agent runtime, and AgentCore Observability
+
+**Front door.** Anyone with IAM access to the account could call the runtime directly and skip the
+API's WAF rate limit. The runtime now has inbound auth through AgentCore Identity: a JWT authorizer
+that accepts only access tokens from our Cognito user pool, issued to the API's app client
+(`allowedClients`). Calls without a token, with a made-up token, or signed with IAM (SigV4) are
+rejected before they reach the container.
+
+- Machine to machine: the API gets tokens with the OAuth client-credentials grant (scope
+  `greatschools-agent/invoke`), caches each one until a minute before it expires, and calls the
+  runtime's HTTPS endpoint (`/runtimes/<arn>/invocations?qualifier=DEFAULT`) with it. Parents still
+  don't sign in; this guards the agent, not the app.
+- The client secret lives in Secrets Manager and reaches the task as an ECS secret, never as a plain
+  environment variable or a CDK output. The task role no longer needs `InvokeAgentRuntime`.
+- A rejected token is dropped so the next call fetches a new one; the parent sees "not reachable".
+- `agent/scripts/check_front_door.py` shows it: no token, a made-up token and a SigV4 call are
+  rejected; a Cognito token gets through.
+
+**Observability.** The runtime container runs under `opentelemetry-instrument` (AWS Distro for
+OpenTelemetry), so every turn's Strands agent spans, model calls and tool calls go to CloudWatch.
+CDK turns on CloudWatch Transaction Search (spans stored in CloudWatch Logs, 100% indexed, since a
+demo sends few) and delivers the runtime's own application logs and traces. The CloudWatch GenAI
+Observability dashboard shows sessions, traces, latency and token use per agent. Transaction
+Search is an account setting: deleting the stack turns it off again. Fargate runs without the
+instrumentation; it only passes calls through.
