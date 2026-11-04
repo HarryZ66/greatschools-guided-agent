@@ -75,5 +75,12 @@ def invoke(op: str, session_id: str, body: dict) -> dict:
 
 def invoke_stream(session_id: str, body: dict) -> Iterator[bytes]:
     """A streamed turn: yields the runtime's server-sent events unchanged."""
-    response = _invoke("turn_stream", session_id, body, "text/event-stream")
-    yield from response["response"].iter_chunks()
+    body_stream = _invoke("turn_stream", session_id, body, "text/event-stream")["response"]
+    # iter_chunks() waits for 1 KB blocks, which holds short progress events back until the
+    # answer arrives. read1() returns whatever bytes have arrived, so progress shows as it happens.
+    raw = getattr(body_stream, "_raw_stream", None)
+    if raw is not None and hasattr(raw, "read1"):
+        while chunk := raw.read1(65536):
+            yield chunk
+    else:
+        yield from body_stream.iter_chunks()
