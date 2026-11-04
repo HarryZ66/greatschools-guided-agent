@@ -241,11 +241,25 @@ Streamed while the agent works (the "I checked this for you" trace).
       "criteria": [ {"need": "...", "status": "...", "evidence": [], "note": "..."} ],
       "watch_out": "Attendance tier is 'poor', and two recent reviews mention understaffing.",
       "cost": {"tuition": 0},
+      "badge": {"need": "mental_health", "label": "Best for counseling", "asked": true,
+                "why": "Most counseling support of these 8 schools: social workers and counselors on staff."},
       "saved": false
     }
   ]
 }
 ```
+
+`badge` is one "Best for ..." per school, or `null`, decided in code (`gs_agent/badges.py`,
+decision 029). A school earns it only when its status for that need is `confirmed` and it is the
+single strongest of the schools shown on a value in the data; a tie gives nobody the badge. Each
+school gets at most one badge and each need goes to at most one school. The parent's needs come
+first (must-haves, then nice-to-haves; `avoid` needs never give a badge), then extra needs the
+parent didn't ask about (`asked: false`), which never include `special_ed` or `ell_support`.
+`why` names the value it is based on. The model sees only the label.
+
+`rank` and `score` order the results and feed the trade-off hints; the parent app doesn't show
+them (no rank numbers, no "% fit"). The per-need `criteria` are shown in the details panel, not
+on the card.
 
 ### `program_results`
 

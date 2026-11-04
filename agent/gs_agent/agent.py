@@ -701,7 +701,7 @@ class GuidedSession:
         if results:
             blocks.append({"type": "school_results", "results": [
                 {**{k: r.get(k) for k in ("school_id", "name", "entity_type", "city", "rank", "score", "criteria",
-                                           "watch_out", "quality_flags", "cost")},
+                                           "watch_out", "quality_flags", "cost", "badge")},
                  "saved": r["school_id"] in self.saved}
                 for r in results]})
         return {"session_id": self.session_id, "blocks": blocks}
@@ -759,5 +759,6 @@ def _compact(found: dict) -> dict:
                          for c in r["criteria"]},
             "data_quality": [f["note"] for f in r["quality_flags"]],
             "cost": r.get("cost"),
+            "badge": (r.get("badge") or {}).get("label"),
         } for r in found["results"]],
     }

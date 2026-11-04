@@ -321,3 +321,28 @@ documents through a managed retrieval service, and each answer names the documen
   `bedrock:Retrieve` on that knowledge base to the Gateway tools Lambda and the runtime role.
 - Retrieval on S3 Vectors is vector-only (no hybrid keyword search), so exact short terms like
   "CTE" rely on the title and aliases being in each document's text.
+
+## 029: Cards show one "Best for ..." badge instead of a rank and a percent fit
+
+The team found that a rank number and "82% fit" don't help parents choose: an exact percent
+suggests a precision that doesn't matter to them, and a rank built from every preference hides
+what each school is good at. The cards now drop the rank and the percent, and move the per-need checklist to the
+details panel. Each card can carry one badge that says what the school stands out for.
+
+- **Code decides the badge** (decision 002), in `gs_agent/badges.py`, from the same verify rules
+  as the statuses. A school earns "Best for X" only when its status for X is `confirmed` and it is
+  the single strongest of the schools shown on a value in the data: latest care pickup, fewest
+  students per teacher, most counseling staff listed, highest rating, and so on. A tie gives
+  nobody the badge, so a card never says "best" when it isn't. Safety needs more good recent
+  reviews than bad ones: mixed reviews can be `confirmed` (no concerns) but not "best".
+- **One per school, one school per need.** The parent's needs go first (must-haves, then
+  nice-to-haves, in their order). Then extra needs they didn't ask about, so a school can stand
+  out for counseling or the arts. The extras never include `special_ed` or `ell_support`: a
+  "best for" label on a need tied to a child's disability or language, unasked, is steering we
+  don't do (decision 007). Those badges appear only when the parent asked for that need.
+- **No claim without evidence.** `why` names the value ("care until 6:30pm"), shown in the
+  details panel and as the badge's tooltip.
+- `rank` and `score` stay in the API: they still order the cards and pick the trade-off questions.
+- "Good to know" now uses the plain-words evidence ("Class size: large"), not raw field names.
+- Not done: a "culture" badge. Culture isn't in the needs catalog; it could become a need built
+  on the "Belonging / Inclusion" and "Teachers / Staff" review topics.

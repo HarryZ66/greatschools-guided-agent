@@ -9,7 +9,7 @@ from typing import Any, Callable
 import boto3
 from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
 
-from . import funding
+from . import badges, funding
 from . import knowledge
 from . import needs as N
 from .config import EMBED_DIMS, EMBED_MODEL, REGION, SCHOOLS_INDEX, search_endpoint
@@ -185,9 +185,9 @@ def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) ->
     })["hits"]["hits"]
 
     max_retrieval = max((h["_score"] or 0 for h in hits), default=0.0) or 1.0
-    results = []
+    results, docs = [], {}
     for hit in hits:
-        school = hit["_source"]
+        school = docs[hit["_id"]] = hit["_source"]
         criteria = [N.verify(school, n) for n in needs]
         # Verified criteria decide most of the rank; the search score breaks near-ties.
         final = 0.85 * N.score(criteria) + 0.15 * ((hit["_score"] or 0) / max_retrieval)
@@ -212,6 +212,7 @@ def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) ->
     shown += [r for r in results[size:] if r["school_id"] in hinted_ids]
     for r in shown:
         r["watch_out"] = watch_out(r)
+    badges.assign(needs, shown, docs)
 
     return {"results": shown, "summary": summarize(needs, shown), "notes": notes,
             "question_hints": hints, "total_candidates": len(hits)}
@@ -263,7 +264,7 @@ def watch_out(result: dict) -> str | None:
     def reason(c: dict) -> str:
         if c["note"]:
             return c["note"]
-        shown = ", ".join(f"{e['field']} is {e['value']}" for e in c["evidence"][:2])
+        shown = N.plain_evidence(c["evidence"][:2])  # "Class size: large", not "class_size.tier is large"
         return f"not met ({shown})" if shown else "not met"
 
     parts = [f"{N.CATALOG[c['need']]['label']}: {reason(c)}"

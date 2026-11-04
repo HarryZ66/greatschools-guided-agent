@@ -103,22 +103,32 @@ function Chips({ block, onRemove, onAdd, busy }) {
   )
 }
 
-function SchoolCard({ r, labels, checked, onToggle, saved, onSave, onDetails }) {
-  const pct = Math.round(r.score * 100)
+const TypeTag = ({ type }) => <span className={'type t-' + type}>{TYPE[type] || humanize(type)}</span>
+
+// One "Best for ..." per school, chosen in code (decision 029); `why` says what it's based on.
+function Badge({ badge, full }) {
+  if (!badge) return null
   return (
-    <article className={'card' + (checked ? ' sel' : '')}>
+    <p className={'badge' + (full ? ' full' : '')} title={full ? undefined : badge.why}>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2.5l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.3l-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z" /></svg>
+      <span><b>{badge.label}</b>{full && <small>{badge.why}</small>}</span>
+    </p>
+  )
+}
+
+// The card stays short: who the school is, its one standout, and what to watch. The full
+// checklist for every need lives in the details panel.
+function SchoolCard({ r, checked, onToggle, saved, onSave, onDetails }) {
+  return (
+    <article className={'card school' + (checked ? ' sel' : '')}>
       <header className="card-head">
-        <div className="title">
-          <h3><span className="rank" aria-label={`Rank ${r.rank}`}>{r.rank}</span>{r.name}</h3>
-          <p className="meta">{TYPE[r.entity_type] || r.entity_type} · {r.city}{r.cost && <> · <Cost cost={r.cost} /></>}</p>
-        </div>
-        <div className="card-side">
-          <span className={'match ' + (pct >= 75 ? 'hi' : pct >= 50 ? 'mid' : 'lo')} title="How well this school fits what you asked for">{pct}% fit</span>
-          <Heart on={saved} onClick={() => onSave(r)} name={r.name} />
-        </div>
+        <TypeTag type={r.entity_type} />
+        <Heart on={saved} onClick={() => onSave(r)} name={r.name} />
       </header>
-      <Checks criteria={r.criteria} labels={labels} />
-      {r.watch_out && <p className="watch"><b>Good to know:</b> {r.watch_out}</p>}
+      <h3><button className="name" onClick={() => onDetails(r)}>{r.name}</button></h3>
+      <p className="meta">{r.city}{r.cost && <> · <Cost cost={r.cost} /></>}</p>
+      <Badge badge={r.badge} />
+      {r.watch_out && <p className="watch" title={r.watch_out}><b>Good to know:</b> {r.watch_out}</p>}
       <footer className="card-foot">
         <button className="link" onClick={() => onDetails(r)}>See details and reviews</button>
         <label className="cmp"><input type="checkbox" checked={checked} onChange={() => onToggle(r.school_id)} /> Compare</label>
@@ -189,7 +199,8 @@ function Details({ school, sessionId, labels, saved, onSave, onClose }) {
           <h2>{school.name}</h2>
           <Heart on={saved} onClick={() => onSave(school)} name={school.name} />
         </div>
-        <p className="meta">{TYPE[school.entity_type] || school.entity_type} · {data ? [data.street, data.city, data.zipcode].filter(Boolean).join(', ') : school.city}</p>
+        <p className="meta drawer-meta"><TypeTag type={school.entity_type} />{data ? [data.street, data.city, data.zipcode].filter(Boolean).join(', ') : school.city}</p>
+        <Badge badge={school.badge} full />
         {error && <p className="watch">I couldn’t load this school: {error}</p>}
         {!data && !error && <p className="meta">Loading…</p>}
         {p && <>
@@ -303,6 +314,10 @@ export default function App() {
   const [showSaved, setShowSaved] = useState(false)
   const [details, setDetails] = useState(null)
   const [split, setSplit] = useState(58)
+  const [pane, setPane] = useState('schools')  // phones show one pane at a time
+  const [unread, setUnread] = useState(false)
+  const paneNow = useRef('schools')  // the pane on screen when a reply lands (replies are async)
+  useEffect(() => { paneNow.current = pane; if (pane === 'chat') setUnread(false) }, [pane])
   const wrap = useRef(null)
   const session = useRef(null)  // the latest session_id, for calls made between renders
 
@@ -338,6 +353,9 @@ export default function App() {
     }
     setQuestion(nextQuestion)
     addMsg(reply)
+    // On a phone, a question needs the chat; otherwise flag the new reply on the Chat tab.
+    if (nextQuestion && !results) setPane('chat')
+    else if (paneNow.current !== 'chat') setUnread(true)
   }
 
   const run = async (event, mine) => {
@@ -402,6 +420,7 @@ export default function App() {
     session.current = null
     setSessionId(null); setChips(null); setSchools([]); setPrograms(null); setMsgs([]); setQuestion(null)
     setPicked([]); setSaved(new Map()); setShowSaved(false); setQuery(''); setZip(''); setStage('home')
+    setPane('schools'); setUnread(false)
   }
 
   const drag = e => {
@@ -447,20 +466,30 @@ export default function App() {
           </div>
           <button className="back" onClick={newSearch}>New search</button>
         </header>
-        <div className="split" ref={wrap}>
+        <div className="tabs" role="tablist" aria-label="Show">
+          <button role="tab" aria-selected={pane === 'schools'} onClick={() => setPane('schools')}>
+            Schools{schools.length ? ` (${schools.length})` : ''}
+          </button>
+          <button role="tab" aria-selected={pane === 'chat'} onClick={() => setPane('chat')}>
+            Chat{unread && <i className="dot" aria-label="new reply" />}
+          </button>
+        </div>
+        <div className={'split pane-' + pane} ref={wrap}>
           <div className="list" style={{ width: split + '%' }}>
             <Chips block={chips} onRemove={removeChip} onAdd={addChip} busy={busy} />
             {schools.length > 0
-              ? <p className="count">{schools.length} schools, best fit first</p>
+              ? <p className="count">{schools.length} schools that match your search. Tap a school for how it fits each of your needs.</p>
               : <p className="count">{busy ? 'Looking for schools…' : sessionId ? 'Answer in the chat and I’ll find schools that fit.' : ''}</p>}
-            {schools.map(r => (
-              <SchoolCard key={r.school_id} r={r} labels={labels} checked={picked.includes(r.school_id)} onToggle={toggle}
-                saved={saved.has(r.school_id)} onSave={toggleSave} onDetails={setDetails} />
-            ))}
+            <div className="cards">
+              {schools.map(r => (
+                <SchoolCard key={r.school_id} r={r} checked={picked.includes(r.school_id)} onToggle={toggle}
+                  saved={saved.has(r.school_id)} onSave={toggleSave} onDetails={setDetails} />
+              ))}
+            </div>
             {programs?.programs?.length > 0 && (
               <>
                 <h4 className="sub">Programs nearby, run by libraries and community centers</h4>
-                {programs.programs.map(p => <ProgramCard key={p.program_id} p={p} />)}
+                <div className="cards">{programs.programs.map(p => <ProgramCard key={p.program_id} p={p} />)}</div>
                 {programs.excluded_past?.length > 0 && (
                   <p className="count">Not shown because they already ended: {programs.excluded_past.map(x => x.name).join(', ')}</p>
                 )}

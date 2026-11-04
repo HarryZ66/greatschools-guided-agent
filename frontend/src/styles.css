@@ -74,15 +74,28 @@ button.chip.suggested:hover{background:#e3f1fa}
 .chipx:hover{color:var(--warn)}
 
 /* school cards */
-.card{background:#fff;border:2px solid transparent;border-radius:14px;padding:16px 18px;margin-bottom:12px;box-shadow:0 1px 3px rgba(20,48,74,.08);transition:border-color .25s,box-shadow .25s}
+/* As many columns as fit the list pane: 1 on phones, 2-3 on a laptop, more on wide screens */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr));gap:14px;align-items:start}
+.card{background:#fff;border:2px solid transparent;border-radius:14px;padding:14px 16px;box-shadow:0 1px 3px rgba(20,48,74,.08);transition:border-color .25s,box-shadow .25s}
 .card:hover{box-shadow:0 6px 20px rgba(20,48,74,.1)}.card.sel{border-color:var(--green)}
-.card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.card-head .title{min-width:0}
-.card h3{margin:0;font-size:18px;display:flex;align-items:center;gap:10px}
-.rank{flex:none;display:inline-grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border-radius:8px;background:#e3f1fa;color:var(--green);font-size:13px;font-weight:700}
-.card-side{display:flex;align-items:center;gap:8px;flex:none}
-.match{font-size:13px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap}
-.match.hi{background:var(--okbg);color:var(--ok)}.match.mid{background:var(--partbg);color:var(--part)}.match.lo{background:var(--badbg);color:var(--warn)}
+.card.school{display:flex;flex-direction:column}
+.card-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:-4px -6px 6px 0}
+.card h3{margin:0;font-size:18px;line-height:1.3}
+.card h3 .name{background:none;border:0;padding:0;text-align:left;color:var(--ink);font-weight:700;font-size:inherit}
+.card h3 .name:hover{color:var(--green);text-decoration:underline;text-underline-offset:3px}
+/* School type: a labeled tag, so it reads at a glance (the word carries it, not just the color) */
+.type{display:inline-flex;align-items:center;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:6px;padding:4px 9px;white-space:nowrap}
+.type.t-public{background:#e3f1fa;color:#13527d}
+.type.t-charter{background:#efeafb;color:#55399a}
+.type.t-private{background:#e2f3f1;color:#0e5f58}
+/* The one "Best for ..." badge */
+.badge{display:flex;align-items:flex-start;gap:7px;margin:10px 0 0;padding:7px 11px;border-radius:10px;background:#fff6dc;color:#5c4300;font-size:14px;width:fit-content;max-width:100%}
+.badge svg{flex:none;fill:#d99a00;margin-top:2px}
+.badge small{display:block;font-size:13px;color:var(--mut);margin-top:2px}
+.badge.full{width:auto;margin:14px 0 4px;padding:10px 12px}
+.card.school .card-foot{margin-top:auto;padding-top:10px}
+/* Two lines on the card; the details panel has the full checklist and data notes */
+.card.school .watch{margin-bottom:2px;line-height:1.4;max-height:calc(2.8em + 16px);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .heart{border:0;background:none;padding:4px;display:grid;place-items:center;border-radius:50%;transition:transform .2s var(--ease),background .2s}
 .heart path{fill:none;stroke:#8a939b;stroke-width:2}
 .heart:hover{background:#fdeef3;transform:scale(1.1)}.heart:hover path{stroke:var(--heart)}
@@ -99,12 +112,12 @@ button.chip.suggested:hover{background:#e3f1fa}
 .checks .attention .ic{background:var(--badbg);color:var(--warn)}.checks .attention em{color:var(--warn)}
 .checks .missing .ic{background:#eef2f5;color:var(--mut)}.checks .missing em{color:var(--mut)}
 .watch{margin:10px 0 0;font-size:13px;color:#8a4b00;background:#fff8e8;border-radius:8px;padding:8px 10px}
-.card-foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:14px}
+.card-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:14px}
 .cmp{display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;color:var(--mut)}.cmp input{accent-color:var(--green);width:17px;height:17px}
 .card.prog h3{font-size:16px;margin:0 0 2px}.card.prog a{color:var(--green)}
 .why{margin:8px 0 0;font-size:14px}
 .fit{margin:6px 0 0;font-size:13px;font-weight:600}.fit.confirmed{color:var(--ok)}.fit.partial{color:var(--part)}.fit.attention{color:var(--warn)}.fit.missing{color:var(--mut)}
-.sub{margin:22px 0 10px;color:var(--mut);font-size:15px}
+.sub{margin:26px 0 10px;color:var(--mut);font-size:15px}
 .cmpbar{position:absolute;bottom:0;left:0;display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -4px 16px rgba(0,0,0,.08);transform:translateY(100%);transition:transform .4s var(--ease)}
 .cmpbar.show{transform:none}
 .cmpbar button{background:var(--green);color:#fff;border:0;border-radius:999px;padding:10px 20px;font-weight:600}
@@ -160,6 +173,7 @@ td .none{color:var(--mut)}
 .overlay.side{place-items:stretch end;padding:0}
 .drawer{position:relative;background:#fff;width:min(520px,100%);height:100%;overflow-y:auto;padding:28px 28px 40px;animation:slide .35s var(--ease)}
 .drawer-head{display:flex;align-items:center;gap:8px;padding-right:30px}.drawer h2{margin:0;font-size:22px}
+.drawer-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px}
 .drawer h4{margin:22px 0 8px;font-size:15px}
 .facts{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:16px 0 4px}
 .facts div{background:var(--bg);border-radius:10px;padding:10px 12px}.facts dt{font-size:12px;color:var(--mut)}.facts dd{margin:2px 0 0;font-weight:700;font-size:16px}
@@ -169,6 +183,18 @@ blockquote small{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 .term{border-bottom:1px solid var(--line);padding:6px 0;font-size:14px}.term summary{cursor:pointer;font-weight:600}.term p{margin:6px 0 2px;color:var(--mut);line-height:1.5}
 @keyframes fade{from{opacity:0}}@keyframes rise{from{opacity:0;transform:translateY(24px) scale(.97)}}@keyframes slide{from{transform:translateX(40px);opacity:0}}
 
-@media(max-width:800px){.split{flex-direction:column}.list,.chatw{width:100%!important}.bar{display:none}.cmpbar{width:100%!important}
-.pg-results>header{flex-wrap:wrap}.pg-results>header .back{display:none}.card-head{flex-direction:column}}
+/* Phones and narrow windows: one pane at a time, picked with the Schools / Chat tabs */
+.tabs{display:none}
+@media(max-width:800px){
+.pg-results>header{flex-wrap:wrap;gap:10px;padding:10px 14px}.pg-results>header .logo{height:34px}
+.pg-results>header .sbox.compact{order:3;flex-basis:100%}.pg-results>header .back{display:none}.savedw{margin-left:auto}
+.tabs{display:flex;gap:4px;padding:6px 14px;background:#fff;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;position:relative;border:0;background:none;padding:9px 0;font-weight:600;color:var(--mut);border-radius:10px}
+.tabs button[aria-selected=true]{background:#e3f1fa;color:#13527d}
+.tabs .dot{position:absolute;top:8px;margin-left:5px;width:8px;height:8px;border-radius:50%;background:var(--heart)}
+.split{flex-direction:column}.list,.chatw{width:100%!important;flex:1;min-height:0}.bar{display:none}
+.split.pane-schools .chatw,.split.pane-chat .list{display:none}
+.list{padding:14px}.cmpbar{width:100%!important;padding:12px 14px}
+.pg-results:has(.pane-chat) .cmpbar{display:none}
+.overlay{padding:10px}.modal{padding:20px 16px}.drawer{padding:22px 18px 36px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.01s!important}}
