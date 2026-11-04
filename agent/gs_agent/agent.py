@@ -29,6 +29,31 @@ log = logging.getLogger("gs_agent.agent")
 Mode = Literal["require", "prefer", "avoid"]
 MAX_TOOL_CALLS = 6  # per turn (docs/contract.md, section 5)
 
+# Needs whose value is a time or an amount the parent gave. On an answer turn the model may only
+# change it when the answer itself gives a new one ("Pickup at 5 works"); picking "The library club
+# works" still means the parent needs care until 6, so the 6pm stays and the program covers the gap.
+KEEP_VALUE_NEEDS = ("after_school_care", "cost")
+_NEW_VALUE = re.compile(r"\d|\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|noon|"
+                        r"dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mediod[ií]a)\b", re.I)
+
+
+def keep_stated_values(previous: list[dict], new: list[dict], answer: str | None) -> set[str]:
+    """Restore times and budgets the parent stated when an answer doesn't give a new one.
+
+    Changes `new` in place and returns the need ids whose value was restored. Only applies on
+    answer turns (`answer` is the parent's answer text); a new query may change anything.
+    """
+    if answer is None or _NEW_VALUE.search(answer):
+        return set()
+    before = {n["need"]: n.get("value") for n in previous}
+    kept = set()
+    for n in new:
+        old = before.get(n["need"])
+        if n["need"] in KEEP_VALUE_NEEDS and old is not None and n.get("value") != old:
+            n["value"] = old
+            kept.add(n["need"])
+    return kept
+
 
 # ---------------------------------------------------------------- structured decision
 
@@ -100,6 +125,8 @@ How you work:
    If a program you found could cover the gap, still ask: name the school and the program, and let
    the parent choose (e.g. "Tamarind Cove's care ends at 5pm. Would the library robotics club from
    5 to 6:30 work, or do you need care at the school until 6?"). Only the parent can decide that.
+   If they pick the program, keep their time (after_school_care stays "18:00") and only change the
+   mode to prefer. Change a time or budget only when the parent gives a new one.
 5. When the parent asks about one school, use get_school_profile with its school_id. If the school
    isn't in your latest results, first call find_school_by_name, then get_school_profile. If several
    schools match, say which one you checked. If none match, say the school isn't in our data.
@@ -170,6 +197,8 @@ class GuidedSession:
         self._tool_calls = 0
         self.searched_this_turn = False  # find_schools ran during the current turn
         self._needs_recap_pending = False  # the conversation restarted after a failed turn
+        self._answer_text: str | None = None  # the parent's answer, on an answer turn
+        self._kept_values: set[str] = set()  # needs whose stated value keep_stated_values restored this turn
         self.agent = self._new_agent()
 
     def progress(self, text: str) -> None:
@@ -214,6 +243,10 @@ class GuidedSession:
             if (stop := session._over_budget()):
                 return stop
             clean = copy.deepcopy([n for n in needs if isinstance(n, dict) and n.get("need") in N.RULES])
+            kept = keep_stated_values(session.needs, clean, session._answer_text)
+            if kept:
+                log.info("session %s: kept the parent's stated value for %s", session.session_id, sorted(kept))
+            session._kept_values |= kept
             session.semantic_query = semantic_query or None
             session.progress(f"Searching schools and checking {len(clean)} of your needs…")
             # find() adds the resolved location center to the needs; keep it for compare and edits
@@ -310,11 +343,13 @@ class GuidedSession:
 
     def handle(self, event: dict) -> dict:
         kind = event.get("type")
+        self._answer_text, self._kept_values = None, set()
         if kind == "query":
             return self._agent_turn(event["text"])
         if kind == "answer":
             label = event.get("text") or self._option_label(event.get("option_id"))
             question = (self.pending_question or {}).get("text", "")
+            self._answer_text = label
             return self._agent_turn(f'(Answer to your question "{question}"): {label}')
         if kind == "compare":
             self.comparison = self._comparison(event.get("school_ids", [])[:2])
@@ -447,7 +482,9 @@ class GuidedSession:
 
     def _blocks(self, decision: Decision | None, show_results: bool = True) -> dict:
         blocks: list[dict[str, Any]] = []
-        self.chip_labels.update({c.need: c for c in (decision.chips if decision else [])})
+        # A restored value keeps its earlier label ("Care until 6pm"), not the model's new one
+        self.chip_labels.update({c.need: c for c in (decision.chips if decision else [])
+                                 if not (c.need in self._kept_values and c.need in self.chip_labels)})
         labels = self.chip_labels
         if decision and not self.needs:
             # No search yet (e.g. the agent asked for a location first): still show what it
