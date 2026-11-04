@@ -91,3 +91,37 @@ tbody th{color:var(--mut);font-weight:600;white-space:nowrap}thead th{font-famil
 .trace li b{display:block;color:var(--ink);font-weight:600}
 .trace li small{margin-left:6px;color:var(--mut)}
 .trace li span{line-height:1.4}
+/* criteria chips from the agent */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.chip{display:inline-flex;align-items:center;gap:4px;background:#fff;border:1.5px solid var(--line);border-radius:999px;padding:5px 12px;font-size:14px}
+.chip.require{border-color:var(--green)}.chip.avoid{border-color:var(--warn)}
+.chip.inferred{background:#fff8e1;border-style:dashed}
+.chip.unmapped{color:var(--mut);background:#eef2f5;border-style:dashed}
+button.chip.suggested{color:var(--green);border-style:dashed;font:inherit;font-size:14px}
+button.chip.suggested:hover{background:#e3f1fa}
+.chipx{border:0;background:none;color:var(--mut);font-size:16px;line-height:1;padding:0 0 0 4px}
+.chipx:hover{color:var(--warn)}
+button:disabled{cursor:not-allowed;opacity:.6}
+/* card additions */
+.tag.missing{background:#eef2f5;color:var(--mut)}
+.watch{margin:10px 0 0;font-size:14px;color:var(--warn)}
+.acts{display:flex;align-items:center;gap:12px;margin-top:12px}
+.save{background:#fff;border:1.5px solid var(--green);color:var(--green);border-radius:999px;padding:6px 14px;font-weight:600}
+.save.on{background:var(--green);color:#fff}
+.vote{display:flex;gap:4px}.vote button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:3px 8px;opacity:.7}
+.vote button.on{opacity:1;border-color:var(--green);background:#e3f1fa}
+.card.prog{display:block}.card.prog h3{margin:0 0 4px;font-size:17px}.card.prog a{color:var(--green)}
+.why{margin:6px 0;font-size:14px}
+.sub{margin:22px 0 10px;color:var(--mut)}
+.savedn{color:var(--green);font-weight:600;white-space:nowrap}
+.summary{margin:-6px 0 16px;font-size:16px}
+/* chat additions */
+.m{white-space:pre-wrap}
+.turn.me{align-self:flex-end}
+.turn .choices{padding:2px 0 0}
+.m.err{background:#fde8e5;color:var(--warn)}
+.m.typing{color:var(--mut);font-style:italic}
+.m .src{display:block;margin-top:6px;color:var(--mut);font-size:12px}
+.m .callout{margin:8px 0 0;padding:8px 10px;border-left:3px solid #e8a317;background:#fff;border-radius:6px;font-size:14px}
+.m .ask{margin:8px 0 0}.m .ask small{display:block;color:var(--mut);margin-top:2px}
+.m .progs{margin-top:8px;white-space:normal}.m .progs .card{box-shadow:none;margin-bottom:8px}
