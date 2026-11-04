@@ -131,7 +131,7 @@ Try it from the command line without the API: `PYTHONPATH=. ../.venv/bin/python 
 
 ## Evaluation
 
-`evals/cases.json` holds 36 parent queries across core searches, missing information, honesty,
+`evals/cases.json` holds 38 parent queries across core searches, missing information, honesty,
 different family needs, fairness, guide questions (P4), programs and edge cases. `evals/run_evals.py` runs them and checks needs
 extraction, questions, refusals, and that every school the agent names was returned by a tool.
 
@@ -143,15 +143,15 @@ Latest run on Claude Sonnet 5.5 (full table in [`evals/results/latest.md`](evals
 
 | Metric | Result |
 |---|---|
-| Cases passed | 36 / 36 |
-| Needs extracted correctly | 18 / 18 |
+| Cases passed | 37 / 38. The miss: in one run of `subgroup_help_ok` the agent helped but added a needless "I can't pick schools by family income"; 3 of 3 reruns passed |
+| Needs extracted correctly | 20 / 20 |
 | Made-up school mentions | 0 |
 | Guide answers citing a guide entry | 5 / 5 (and none for a term the guide lacks) |
 | Program cases (fill a gap, interest match, past-only excluded, nothing found) | 5 / 5 |
 | Errors | 0 |
-| Latency per turn | median 7.3 s, max 13.7 s |
-| Tokens per turn | ~14,400, 80% of input served from the prompt cache |
-| Estimated cost per turn | ~$0.027 with prompt caching, vs ~$0.054 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
+| Latency per turn | median 8.1 s, max 17.2 s |
+| Tokens per turn | ~14,800, 84% of input served from the prompt cache |
+| Estimated cost per turn | ~$0.025 with prompt caching, vs ~$0.055 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
 
 Vague requests ("a good elementary school in Miami", in English and Spanish) get one question about
 what the child needs: learning support, after-school care, a bus or counseling.

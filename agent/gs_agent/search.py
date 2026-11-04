@@ -40,22 +40,34 @@ def embed(text: str) -> list[float]:
     return json.loads(response["body"].read())["embedding"]
 
 
-def resolve_location(value: dict) -> dict | None:
-    """Center point for a city, from the schools we have there. None if we have none."""
-    city = str(value.get("city", "")).strip()
-    if not city:
-        return None
-    hits = client().search(index=SCHOOLS_INDEX, body={
-        "size": 50, "_source": ["location"],
-        "query": {"bool": {"should": [{"term": {"city": city}}, {"term": {"city": city.title()}}],
-                           "minimum_should_match": 1}},
-    })["hits"]["hits"]
+def _center_of(query: dict) -> dict | None:
+    hits = client().search(index=SCHOOLS_INDEX, body={"size": 50, "_source": ["location"], "query": query})["hits"]["hits"]
     points = [h["_source"]["location"] for h in hits if h["_source"].get("location")]
     if not points:
         return None
     return {"lat": sum(p["lat"] for p in points) / len(points), "lon": sum(p["lon"] for p in points) / len(points)}
 
 
+def resolve_location(value: dict) -> dict | None:
+    """Center point for a city or a ZIP code, from the schools we have there. None if we have none.
+
+    A ZIP is matched from our own data (exact, then the same 4- and 3-digit area), never from
+    the model's memory, so a ZIP outside our data gets "no schools there" instead of a guess.
+    """
+    zipcode = "".join(ch for ch in str(value.get("zip") or "") if ch.isdigit())[:5]
+    if len(zipcode) == 5:
+        for prefix in (zipcode, zipcode[:4], zipcode[:3]):
+            q = {"term": {"zipcode": prefix}} if prefix == zipcode else {"prefix": {"zipcode": prefix}}
+            if (center := _center_of(q)):
+                return center
+    city = str(value.get("city", "")).strip()
+    if not city:
+        return None
+    return _center_of({"bool": {"should": [{"term": {"city": city}}, {"term": {"city": city.title()}}],
+                                "minimum_should_match": 1}})
+
+
+DATA_PROBLEM_PENALTY = 0.02  # score taken off per data problem (quality_flags), up to 3: a tie-breaker
 CANDIDATES = 50  # schools pulled from OpenSearch per search; code verifies and re-ranks these
 MODE_BOOST = {"require": 3.0, "prefer": 1.0, "avoid": 1.0}
 SEMANTIC_BOOST = 2.0
@@ -159,7 +171,7 @@ def _filters(needs: list[dict]) -> tuple[list[dict], dict]:
         elif need["need"] == "location" and value:
             center = resolve_location(value)
             if center is None:
-                notes["location"] = f"We have no schools in '{value.get('city')}' in our data."
+                notes["location"] = f"We have no schools in '{N.place(value)}' in our data."
                 notes["cities_with_data"] = covered_cities()
                 filters.append({"term": {"city": "__none__"}})
             else:
@@ -188,8 +200,13 @@ def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) ->
     for hit in hits:
         school = hit["_source"]
         criteria = [N.verify(school, n) for n in needs]
+        flags = N.quality_flags(school)
         # Verified criteria decide most of the rank; the search score breaks near-ties.
         final = 0.85 * N.score(criteria) + 0.15 * ((hit["_score"] or 0) / max_retrieval)
+        # A "yes" read from data with obvious problems is less certain. Each problem takes a little
+        # off (at most 3), enough that a clean school with the same checks comes first, but never
+        # enough to drop a school below ones that meet fewer of the parent's needs.
+        final -= DATA_PROBLEM_PENALTY * min(len(flags), 3)
         results.append({
             "school_id": hit["_id"],
             "name": school.get("name"),
@@ -198,7 +215,7 @@ def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) ->
             "level_codes": school.get("level_codes"),
             "score": round(final, 3),
             "criteria": criteria,
-            "quality_flags": N.quality_flags(school),
+            "quality_flags": flags,
             "cost": funding.cost_summary(school),
         })
     results.sort(key=lambda r: r["score"], reverse=True)

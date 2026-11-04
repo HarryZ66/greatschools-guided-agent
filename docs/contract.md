@@ -48,7 +48,8 @@ For every school × need, `verify_criteria` returns one status:
 - Reviews (`reviews_full[].created_date`): reviews over 3 years old don't count toward
   `confirmed`, and the UI labels them "older review".
 
-**Data quality flags** (the value is shown but not used for ranking)
+**Data quality flags** (the value is shown but not used for a status; each flag takes 0.02 off the
+school's `score`, at most 3, so a clean school with the same checks ranks first)
 - `enrollment` of 0 or 1
 - `student_teacher_ratio` over 40
 - A school `start_time` in the PM, or an `end_time` in the AM

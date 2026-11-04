@@ -36,11 +36,12 @@ def _time_fit(sessions: list[dict], time_from: str | None, time_to: str | None) 
     if not (time_from and time_to) or not sessions:
         return None
     start, end = sessions[0]["start"], sessions[0]["end"]
+    runs, gap = f"Runs {N.clock(start)}–{N.clock(end)}", f"{N.clock(time_from)}–{N.clock(time_to)}"
     if start <= time_from and end >= time_to:
-        return {"status": N.CONFIRMED, "note": f"Runs {start}-{end}, covering {time_from}-{time_to}."}
+        return {"status": N.CONFIRMED, "note": f"{runs}, covers {gap}."}
     if start < time_to and end > time_from:
-        return {"status": N.PARTIAL, "note": f"Runs {start}-{end}; only part of {time_from}-{time_to}."}
-    return {"status": N.ATTENTION, "note": f"Runs {start}-{end}, outside {time_from}-{time_to}."}
+        return {"status": N.PARTIAL, "note": f"{runs}; covers only part of {gap}."}
+    return {"status": N.ATTENTION, "note": f"{runs}, outside {gap}."}
 
 
 def _flags(program: dict) -> list[dict]:
@@ -70,9 +71,7 @@ NEED_INTEREST = {
 GAP_WORDING = {N.MISSING: "doesn't list", N.PARTIAL: "only partly offers", N.ATTENTION: "falls short on"}
 
 
-def _clock(hhmm: str) -> str:
-    h, m = map(int, hhmm.split(":"))
-    return f"{(h - 1) % 12 + 1}:{m:02d} {'AM' if h < 12 else 'PM'}"
+_clock = N.clock
 
 
 def _school_day_end(school: dict) -> str:

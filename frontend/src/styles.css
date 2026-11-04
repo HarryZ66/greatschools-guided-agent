@@ -33,7 +33,6 @@ button:disabled{cursor:not-allowed;opacity:.6}
 .sbox:focus-within{border-color:var(--green);box-shadow:0 8px 30px rgba(42,157,111,.18)}
 .sbox input{border:0;outline:0;font:inherit;font-size:18px;background:transparent;color:var(--ink)}
 .sbox .q{flex:1;min-width:0}
-.sbox .zip{width:120px;border-left:1px solid var(--line);padding-left:14px;font-size:16px}
 .go{flex:none;width:48px;height:48px;border-radius:50%;border:0;background:var(--green);color:#fff;display:grid;place-items:center;transition:transform .3s var(--ease),background .2s}
 .go:hover{background:#176aa3;transform:scale(1.06)}
 .go.busy{animation:pulse .65s var(--ease) forwards}
@@ -45,6 +44,7 @@ button:disabled{cursor:not-allowed;opacity:.6}
 .savedw{position:relative}
 .savedn{background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 14px;color:var(--mut);font-weight:600;white-space:nowrap}
 .savedn.on{color:var(--heart);border-color:#f3b6c8}
+.home-saved{margin-left:auto}
 .savedlist{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:300px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(20,48,74,.15);padding:10px 14px;animation:pop .2s var(--ease)}
 .saveditem{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
 .saveditem:last-child{border-bottom:0}.saveditem .link{text-align:left}
