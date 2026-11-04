@@ -16,6 +16,7 @@ from aws_cdk import (
     aws_ecs as ecs,
     aws_ecs_patterns as ecs_patterns,
     aws_iam as iam,
+    aws_lambda as lambda_,
     aws_logs as logs,
     aws_opensearchservice as opensearch,
     aws_s3 as s3,
@@ -33,6 +34,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CLOUDFRONT_PREFIX_LIST = "pl-3b927c52"
 # Agent turns allowed per IP address per 5 minutes; a parent uses a few per minute
 TURN_RATE_LIMIT = 300
+# The Gateway's MCP tools, shared with the Lambda handler (agent/gs_agent/gateway_tools.py)
+GATEWAY_TOOLS = json.loads((REPO_ROOT / "agent" / "gs_agent" / "gateway_tools.json").read_text())
+
+
+def _schema(s: dict) -> agentcore.CfnGatewayTarget.SchemaDefinitionProperty:
+    """A JSON schema from gateway_tools.json as the Gateway target's schema type."""
+    return agentcore.CfnGatewayTarget.SchemaDefinitionProperty(
+        type=s["type"], description=s.get("description"), required=s.get("required"),
+        items=_schema(s["items"]) if "items" in s else None,
+        properties={k: _schema(v) for k, v in s["properties"].items()} if "properties" in s else None)
 
 
 class AppStack(Stack):
@@ -103,6 +114,46 @@ class AppStack(Stack):
         discovery_url = (f"https://cognito-idp.{self.region}.amazonaws.com/{user_pool.user_pool_id}"
                          "/.well-known/openid-configuration")
 
+        # AgentCore Gateway (decision 027): the agent's data lookups as MCP tools, served by one
+        # Lambda function from the same code. IAM inbound auth: only the runtime's role may call it.
+        tools_fn = lambda_.DockerImageFunction(
+            self, "GatewayToolsFunction",
+            code=lambda_.DockerImageCode.from_image_asset(
+                str(REPO_ROOT / "agent"), file="Dockerfile.tools", platform=ecr_assets.Platform.LINUX_ARM64),
+            architecture=lambda_.Architecture.ARM_64, memory_size=1024, timeout=Duration.seconds(30),
+            description="GreatSchools agent data tools behind the AgentCore Gateway",
+            environment={"SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}"},
+            log_group=logs.LogGroup(self, "GatewayToolsLogs", retention=logs.RetentionDays.TWO_WEEKS,
+                                    removal_policy=RemovalPolicy.DESTROY))
+        domain.grant_read(tools_fn)
+        tools_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],  # Titan embeddings for the guide and program searches
+            resources=[f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-embed-text-v2:0"]))
+
+        gateway_role = iam.Role(self, "GatewayRole", assumed_by=iam.ServicePrincipal(
+            "bedrock-agentcore.amazonaws.com", conditions={"StringEquals": {"aws:SourceAccount": self.account}}))
+        tools_fn.grant_invoke(gateway_role)
+        gateway = agentcore.CfnGateway(
+            self, "ToolsGateway", name="greatschools-tools", protocol_type="MCP", authorizer_type="AWS_IAM",
+            role_arn=gateway_role.role_arn, description="GreatSchools data tools for the guided search agent")
+        gateway.node.add_dependency(gateway_role)
+        tools_target = agentcore.CfnGatewayTarget(
+            self, "ToolsGatewayTarget", gateway_identifier=gateway.attr_gateway_identifier, name="gs-data",
+            description="Parent guide, programs, school by name, school record",
+            target_configuration=agentcore.CfnGatewayTarget.TargetConfigurationProperty(
+                mcp=agentcore.CfnGatewayTarget.McpTargetConfigurationProperty(
+                    lambda_=agentcore.CfnGatewayTarget.McpLambdaTargetConfigurationProperty(
+                        lambda_arn=tools_fn.function_arn,
+                        tool_schema=agentcore.CfnGatewayTarget.ToolSchemaProperty(inline_payload=[
+                            agentcore.CfnGatewayTarget.ToolDefinitionProperty(
+                                name=t["name"], description=t["description"], input_schema=_schema(t["inputSchema"]))
+                            for t in GATEWAY_TOOLS])))),
+            credential_provider_configurations=[agentcore.CfnGatewayTarget.CredentialProviderConfigurationProperty(
+                credential_provider_type="GATEWAY_IAM_ROLE")])
+        tools_target.node.add_dependency(gateway_role)
+        runtime_role.add_to_principal_policy(iam.PolicyStatement(
+            actions=["bedrock-agentcore:InvokeGateway"], resources=[gateway.attr_gateway_arn]))
+
         runtime = agentcore.CfnRuntime(
             self, "AgentRuntime",
             agent_runtime_name="greatschools_guided_agent",
@@ -123,6 +174,8 @@ class AppStack(Stack):
             environment_variables={
                 "PORT": "8080",
                 "RUNNING_ON": "agentcore",
+                "GATEWAY_URL": gateway.attr_gateway_url,
+                "GATEWAY_TARGET": "gs-data",
                 "AWS_REGION": self.region,
                 "AWS_DEFAULT_REGION": self.region,
                 "SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}",
@@ -292,6 +345,7 @@ class AppStack(Stack):
         CfnOutput(self, "AppUrl", value=f"https://{distribution.distribution_domain_name}")
         CfnOutput(self, "ApiUrl", value=f"https://{distribution.distribution_domain_name}/api")
         CfnOutput(self, "AgentRuntimeArn", value=runtime.attr_agent_runtime_arn)
+        CfnOutput(self, "GatewayUrl", value=gateway.attr_gateway_url)
         # For agent/scripts/check_front_door.py (no secrets: the client secret stays in Secrets Manager)
         CfnOutput(self, "OAuthTokenUrl", value=f"{token_domain.base_url()}/oauth2/token")
         CfnOutput(self, "OAuthClientId", value=api_client.user_pool_client_id)

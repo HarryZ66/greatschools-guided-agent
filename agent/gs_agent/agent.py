@@ -20,6 +20,7 @@ from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models import BedrockModel, CacheConfig
 
+from . import gateway_client as G
 from . import needs as N
 from . import programs as P
 from . import search
@@ -288,6 +289,18 @@ class GuidedSession:
     def _tools(self) -> list:
         session = self
 
+        def service(backend: str) -> str:
+            # Data lookups go through the AgentCore Gateway's MCP tools when it is configured (decision 027)
+            return f"{G.SERVICE} → {backend}" if G.enabled() else backend
+
+        def lookup(tool_name: str, args: dict, backend: str, started: float):
+            """Run a data tool; on a Gateway failure, record it and return None."""
+            try:
+                return G.call(tool_name, args)
+            except G.GatewayError:
+                session._step(tool_name, service(backend), "The lookup failed, so I didn't use it", started)
+                return None
+
         @tool
         def find_schools(needs: list[dict], semantic_query: str = "") -> str:
             """Search schools and check every need against the data.
@@ -328,14 +341,14 @@ class GuidedSession:
                 session._step("get_school_profile", "Agent", "Stopped: tool limit for this turn reached")
                 return stop
             started = time.perf_counter()
-            school = search.get_school(school_id)
+            school = lookup("get_school", {"school_id": school_id}, "Amazon OpenSearch", started)
             if school is None:
-                session._step("get_school_profile", "Amazon OpenSearch", f"No school with id {school_id}", started)
+                session._step("get_school_profile", service("Amazon OpenSearch"), f"No school with id {school_id}", started)
                 return json.dumps({"error": f"No school with id {school_id}"})
             session.progress(f"Reading the profile for {school.get('name', school_id)}…")
             session.seen_ids.add(school_id)
             criteria = [N.verify(school, n) for n in copy.deepcopy(session.needs)]
-            session._step("get_school_profile", "Amazon OpenSearch",
+            session._step("get_school_profile", service("Amazon OpenSearch"),
                           f"Read the profile for {school.get('name', school_id)} and checked "
                           f"{len(criteria)} of your needs against its data", started)
             keep = {k: v for k, v in school.items() if k not in ("reviews_full", "reviews_text", "profile_text")}
@@ -353,8 +366,10 @@ class GuidedSession:
                 return stop
             started = time.perf_counter()
             session.progress(f"Looking up '{name}'…")
-            matches = search.find_by_name(name)
-            session._step("find_school_by_name", "Amazon OpenSearch",
+            matches = lookup("find_school_by_name", {"name": name}, "Amazon OpenSearch", started)
+            if matches is None:
+                return json.dumps({"matches": [], "note": "The lookup failed; ask the parent to try again."})
+            session._step("find_school_by_name", service("Amazon OpenSearch"),
                           f"Looked up '{name}': {len(matches)} school{'s' if len(matches) != 1 else ''} with that name"
                           if matches else f"Looked up '{name}': no school with that name in our data", started)
             session.seen_ids.update(m["school_id"] for m in matches)
@@ -376,8 +391,10 @@ class GuidedSession:
                 return stop
             started = time.perf_counter()
             session.progress("Checking the parent guide…")
-            entries = search.lookup_content(question)
-            session._step("lookup_content", "Amazon OpenSearch + Titan Embeddings",
+            entries = lookup("lookup_guide", {"question": question}, "Amazon OpenSearch + Titan Embeddings", started)
+            if entries is None:
+                return json.dumps({"entries": [], "note": "The guide lookup failed; don't answer from memory."})
+            session._step("lookup_content", service("Amazon OpenSearch + Titan Embeddings"),
                           "Searched the parent guide: " + (", ".join(e["title"] for e in entries) if entries
                                                            else "no entry covers this, so I won't answer from memory"),
                           started)
@@ -405,11 +422,15 @@ class GuidedSession:
                 return stop
             started = time.perf_counter()
             session.progress(f"Looking for nearby programs: {interest}…")
-            found = P.find_programs(interest, city, near_school_id, grades, time_from, time_to)
+            found = lookup("search_programs", {"interest": interest, "city": city, "near_school_id": near_school_id,
+                                               "grades": grades, "time_from": time_from, "time_to": time_to},
+                           "Amazon OpenSearch + Titan Embeddings", started)
+            if found is None:
+                return json.dumps({"programs": [], "note": "The program search failed."})
             n, past = len(found["programs"]), found["excluded_past"]
             where = "near the school" if near_school_id else f"in {city}" if city else "nearby"
             gap = f", covering {time_from}–{time_to}" if time_from and time_to else ""
-            session._step("search_programs", "Amazon OpenSearch + Titan Embeddings",
+            session._step("search_programs", service("Amazon OpenSearch + Titan Embeddings"),
                           f"Searched programs for '{interest}' {where}{gap}: {n} with upcoming sessions"
                           + (f"; skipped {len(past)} with only past sessions" if past else ""), started)
             session.last_programs, session.programs_fresh = found, True
