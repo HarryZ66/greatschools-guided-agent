@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_cloudfront_origins as origins,
     aws_dynamodb as dynamodb,
     aws_ec2 as ec2,
+    aws_ecr_assets as ecr_assets,
     aws_ecs as ecs,
     aws_ecs_patterns as ecs_patterns,
     aws_iam as iam,
@@ -64,7 +65,9 @@ class AppStack(Stack):
             runtime_platform=ecs.RuntimePlatform(cpu_architecture=ecs.CpuArchitecture.ARM64,
                                                  operating_system_family=ecs.OperatingSystemFamily.LINUX),
             task_image_options=ecs_patterns.ApplicationLoadBalancedTaskImageOptions(
-                image=ecs.ContainerImage.from_asset(str(REPO_ROOT / "agent")),
+                # Build for ARM64 whatever machine runs the deploy; an x86 laptop would otherwise
+                # build an amd64 image that exits at once on Graviton (exit code 255, no logs).
+                image=ecs.ContainerImage.from_asset(str(REPO_ROOT / "agent"), platform=ecr_assets.Platform.LINUX_ARM64),
                 container_port=8000,
                 log_driver=ecs.LogDrivers.aws_logs(stream_prefix="agent", log_group=log_group),
                 environment={
