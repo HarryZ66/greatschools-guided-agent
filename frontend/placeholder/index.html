@@ -29,6 +29,9 @@
   .confirmed { color: var(--ok); } .partial { color: var(--part); } .needs_attention { color: var(--bad); } .missing { color: var(--miss); }
   .watch { margin-top: 8px; font-size: 13px; color: var(--bad); }
   .status { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .trace summary { cursor: pointer; font-weight: 600; }
+  .trace ol { margin: 8px 0 0; padding-left: 20px; font-size: 13px; }
+  .trace .muted { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -69,14 +72,14 @@ async function send(event) {
         else if (msg.type === "result") {
           sessionId = msg.response.session_id;
           status.textContent = `Answered in ${(msg.response.elapsed_ms / 1000).toFixed(1)}s`;
-          render(msg.response.blocks);
+          render(msg.response.blocks, msg.response.trace);
         }
       }
     }
   } catch (e) { status.textContent = "Error: " + e.message; }
 }
 
-function render(blocks) {
+function render(blocks, trace) {
   out.innerHTML = "";
   for (const b of blocks) {
     const el = document.createElement("div");
@@ -110,6 +113,14 @@ function render(blocks) {
     } else if (b.type === "comparison") {
       el.className = "box"; el.textContent = b.summary || "";
     }
+    out.appendChild(el);
+  }
+  if (trace && trace.steps.length) {  // what really ran this turn, recorded by code
+    const el = document.createElement("details");
+    el.className = "box trace";
+    el.innerHTML = `<summary>How I checked this (${trace.steps.length} steps)</summary><ol>` +
+      trace.steps.map(s => `<li><b>${esc(s.service)}</b>: ${esc(s.text)}${s.ms != null ? ` <span class="muted">${s.ms} ms</span>` : ""}</li>`).join("") +
+      "</ol>";
     out.appendChild(el);
   }
 }

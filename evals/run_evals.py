@@ -9,6 +9,7 @@ Checks per case (see evals/cases.json):
                when a mode is given, it must match; optional_needs may appear or not
   need_values  need values after the last turn (e.g. care time kept after answering a question)
   ask          the agent asked something (question block, or a question in its message)
+  question_any words that must appear in the question block or its options
   no_results   no school cards were returned
   refuse       the agent declined a demographic filter (or, when false, did not)
   sources      the answer cites guide entries returned by lookup_content (or, when false, none)
@@ -121,6 +122,10 @@ def run_case(case: dict, cores: dict) -> dict:
     if "need_values" in expect:
         values = {n["need"]: n.get("value") for n in session.needs}
         checks["need_values"] = all(values.get(k) == v for k, v in expect["need_values"].items())
+    if "question_any" in expect:  # words that must appear in the question or its options
+        q = next((b for b in last["blocks"] if b["type"] == "clarifying_question"), None)
+        q_text = (q["text"] + " " + " ".join(o["label"] for o in q["options"])).lower() if q else ""
+        checks["question_any"] = any(w.lower() in q_text for w in expect["question_any"])
     if "ask" in expect:
         asked = any(b["type"] == "clarifying_question" for b in last["blocks"]) or "?" in text
         checks["ask"] = asked == expect["ask"]

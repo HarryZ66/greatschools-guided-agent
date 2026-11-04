@@ -9,6 +9,7 @@ import copy
 import json
 import logging
 import re
+import time
 import uuid
 from typing import Any, Callable, Literal
 
@@ -23,6 +24,9 @@ from . import needs as N
 from . import programs as P
 from . import search
 from .config import MAIN_MODEL, REGION
+
+MODEL_NAME = {"us.anthropic.claude-sonnet-5-5": "Claude Sonnet 5.5",
+              "us.anthropic.claude-haiku-5-5": "Claude Haiku 5.5"}.get(MAIN_MODEL, MAIN_MODEL)
 
 log = logging.getLogger("gs_agent.agent")
 
@@ -127,6 +131,12 @@ How you work:
    5 to 6:30 work, or do you need care at the school until 6?"). Only the parent can decide that.
    If they pick the program, keep their time (after_school_care stays "18:00") and only change the
    mode to prefer. Change a time or budget only when the parent gives a new one.
+   Help the parent find what matters: if they gave little beyond grade and location (e.g. "a good
+   elementary school in Miami") and there are no question_hints, still search, then ask ONE question
+   about what their child needs, because parents often don't know these can be checked. Offer the
+   3-4 options most likely for this family from: learning support (IEP or 504), after-school care,
+   a school bus, counseling support, strong academics, small classes. If grade or location is
+   missing, ask for that first (rule 2) and offer 1-2 of these as suggestions instead.
 5. When the parent asks about one school, use get_school_profile with its school_id. If the school
    isn't in your latest results, first call find_school_by_name, then get_school_profile. If several
    schools match, say which one you checked. If none match, say the school isn't in our data.
@@ -199,6 +209,8 @@ class GuidedSession:
         self._needs_recap_pending = False  # the conversation restarted after a failed turn
         self._answer_text: str | None = None  # the parent's answer, on an answer turn
         self._kept_values: set[str] = set()  # needs whose stated value keep_stated_values restored this turn
+        self._trace: list[dict] = []  # what really ran this turn, recorded by code (contract: `trace`)
+        self._turn_started = 0.0
         self.agent = self._new_agent()
 
     def progress(self, text: str) -> None:
@@ -207,6 +219,42 @@ class GuidedSession:
                 self.on_progress(text)
             except Exception:
                 log.exception("progress callback failed")
+
+    def _step(self, tool: str, service: str, text: str, started: float | None = None) -> None:
+        """Record one step of this turn. Written by code from what actually ran, never by the model."""
+        step = {"tool": tool, "service": service, "text": text}
+        if started is not None:
+            step["ms"] = round((time.perf_counter() - started) * 1000)
+        self._trace.append(step)
+
+    def _trace_search(self, needs: list[dict], started: float, kept: set[str]) -> None:
+        """Steps for one school search: OpenSearch retrieval, then the code checks on the results."""
+        r = self.last or {}
+        results, total = r.get("results", []), r.get("total_candidates", 0)
+        vector = bool(self.semantic_query)
+        self._step("find_schools", "Amazon OpenSearch" + (" + Titan Embeddings" if vector else ""),
+                   (f"Found {total} candidate schools for your grade and area, scored by your "
+                    f"{len(needs)} needs" + (" and your own words (vector match)" if vector else ""))
+                   if total else "No schools in our data for that grade and area", started)
+        if not results:
+            return
+        counts: dict[str, int] = {}
+        for res in results:
+            for c in res["criteria"]:
+                counts[c["status"]] = counts.get(c["status"], 0) + 1
+        words = {N.CONFIRMED: "confirmed", N.PARTIAL: "partial", N.ATTENTION: "need attention", N.MISSING: "missing"}
+        tally = ", ".join(f"{counts[k]} {w}" for k, w in words.items() if counts.get(k))
+        flagged = sum(1 for res in results if res["quality_flags"])
+        self._step("verify", "Code (no model)",
+                   f"Checked {len(needs)} needs on the top {len(results)} schools against the data: {tally}"
+                   + (f". Flagged data problems at {flagged} school{'s' if flagged != 1 else ''}" if flagged else ""))
+        hints = r.get("question_hints") or []
+        if hints:
+            self._step("trade_offs", "Code (no model)",
+                       f"Spotted {len(hints)} trade-off{'s' if len(hints) != 1 else ''} worth asking you about")
+        if kept:
+            names = ", ".join(N.CATALOG[k]["label"].lower() for k in sorted(kept))
+            self._step("keep_values", "Code (no model)", f"Kept the time or budget you gave for {names}")
 
     def _over_budget(self) -> str | None:
         self._tool_calls += 1
@@ -241,7 +289,9 @@ class GuidedSession:
                 semantic_query: Short description of softer wishes, in the parent's words.
             """
             if (stop := session._over_budget()):
+                session._step("find_schools", "Agent", "Stopped: tool limit for this turn reached")
                 return stop
+            started = time.perf_counter()
             clean = copy.deepcopy([n for n in needs if isinstance(n, dict) and n.get("need") in N.RULES])
             kept = keep_stated_values(session.needs, clean, session._answer_text)
             if kept:
@@ -256,6 +306,7 @@ class GuidedSession:
             session.seen_ids.update(r["school_id"] for r in session.last["results"])
             session.progress(f"Checked {session.last['total_candidates']} schools; "
                              f"ranking the top {len(session.last['results'])}.")
+            session._trace_search(clean, started, kept)
             return json.dumps(_compact(session.last))
 
         @tool
@@ -266,13 +317,19 @@ class GuidedSession:
                 school_id: e.g. "fl-95390"
             """
             if (stop := session._over_budget()):
+                session._step("get_school_profile", "Agent", "Stopped: tool limit for this turn reached")
                 return stop
+            started = time.perf_counter()
             school = search.get_school(school_id)
             if school is None:
+                session._step("get_school_profile", "Amazon OpenSearch", f"No school with id {school_id}", started)
                 return json.dumps({"error": f"No school with id {school_id}"})
             session.progress(f"Reading the profile for {school.get('name', school_id)}…")
             session.seen_ids.add(school_id)
-            criteria =[N.verify(school, n) for n in copy.deepcopy(session.needs)]
+            criteria = [N.verify(school, n) for n in copy.deepcopy(session.needs)]
+            session._step("get_school_profile", "Amazon OpenSearch",
+                          f"Read the profile for {school.get('name', school_id)} and checked "
+                          f"{len(criteria)} of your needs against its data", started)
             keep = {k: v for k, v in school.items() if k not in ("reviews_full", "reviews_text", "profile_text")}
             return json.dumps({"school": keep, "criteria": criteria, "quality_flags": N.quality_flags(school)})[:12000]
 
@@ -284,9 +341,14 @@ class GuidedSession:
                 name: The school name as the parent wrote it, e.g. "Lanternfish K-8".
             """
             if (stop := session._over_budget()):
+                session._step("find_school_by_name", "Agent", "Stopped: tool limit for this turn reached")
                 return stop
+            started = time.perf_counter()
             session.progress(f"Looking up '{name}'…")
             matches = search.find_by_name(name)
+            session._step("find_school_by_name", "Amazon OpenSearch",
+                          f"Looked up '{name}': {len(matches)} school{'s' if len(matches) != 1 else ''} with that name"
+                          if matches else f"Looked up '{name}': no school with that name in our data", started)
             session.seen_ids.update(m["school_id"] for m in matches)
             if not matches:
                 return json.dumps({"matches": [], "note": f"No school named like '{name}' in our data."})
@@ -302,9 +364,15 @@ class GuidedSession:
                 question: The parent's question, in their words.
             """
             if (stop := session._over_budget()):
+                session._step("lookup_content", "Agent", "Stopped: tool limit for this turn reached")
                 return stop
+            started = time.perf_counter()
             session.progress("Checking the parent guide…")
             entries = search.lookup_content(question)
+            session._step("lookup_content", "Amazon OpenSearch + Titan Embeddings",
+                          "Searched the parent guide: " + (", ".join(e["title"] for e in entries) if entries
+                                                           else "no entry covers this, so I won't answer from memory"),
+                          started)
             session.seen_content.update({e["id"]: e["title"] for e in entries})
             if not entries:
                 return json.dumps({"entries": [], "note": "No guide entry covers this."})
@@ -325,9 +393,17 @@ class GuidedSession:
                 time_to: End of the gap, "HH:MM" (e.g. parent needs "18:00").
             """
             if (stop := session._over_budget()):
+                session._step("search_programs", "Agent", "Stopped: tool limit for this turn reached")
                 return stop
+            started = time.perf_counter()
             session.progress(f"Looking for nearby programs: {interest}…")
             found = P.find_programs(interest, city, near_school_id, grades, time_from, time_to)
+            n, past = len(found["programs"]), found["excluded_past"]
+            where = "near the school" if near_school_id else f"in {city}" if city else "nearby"
+            gap = f", covering {time_from}–{time_to}" if time_from and time_to else ""
+            session._step("search_programs", "Amazon OpenSearch + Titan Embeddings",
+                          f"Searched programs for '{interest}' {where}{gap}: {n} with upcoming sessions"
+                          + (f"; skipped {len(past)} with only past sessions" if past else ""), started)
             session.last_programs, session.programs_fresh = found, True
             session.seen_programs.update(p["program_id"] for p in found["programs"])
             return json.dumps({
@@ -342,8 +418,15 @@ class GuidedSession:
     # ---------------------------------------------------------------- turns
 
     def handle(self, event: dict) -> dict:
-        kind = event.get("type")
         self._answer_text, self._kept_values = None, set()
+        self._trace, self._turn_started = [], time.perf_counter()
+        response = self._handle(event)
+        response["trace"] = {"steps": self._trace,
+                             "elapsed_ms": round((time.perf_counter() - self._turn_started) * 1000)}
+        return response
+
+    def _handle(self, event: dict) -> dict:
+        kind = event.get("type")
         if kind == "query":
             return self._agent_turn(event["text"])
         if kind == "answer":
@@ -356,6 +439,8 @@ class GuidedSession:
             if self.comparison is None:
                 raise ValueError("Both school ids must exist")
             names = " and ".join(self.comparison["names"])
+            self._step("compare", "Code (no model)",
+                       f"Built the side-by-side table for {names} from the same checks as the cards")
             return self._agent_turn(
                 f"Compare {names} for my needs. Here is the side-by-side check (already shown to me as a table): "
                 f"{json.dumps(self.comparison['rows'])}. Don't call tools. In the message, say in 1-2 sentences "
@@ -367,6 +452,7 @@ class GuidedSession:
     def _agent_turn(self, text: str) -> dict:
         self._drop_old_thinking()
         self._tool_calls, self.searched_this_turn = 0, False
+        calls_before = self.usage["model_calls"]
         if self._needs_recap_pending:
             self._needs_recap_pending = False
             if self.needs:
@@ -383,6 +469,10 @@ class GuidedSession:
                 self._tool_calls = 0
                 result = self.agent(f"{self._recap()}\n\n{text}", structured_output_model=Decision)
             self._add_usage(result.metrics)
+            calls = self.usage["model_calls"] - calls_before
+            self._trace.insert(0, {"tool": "understand", "service": f"{MODEL_NAME} on Amazon Bedrock",
+                                   "text": f"Read your message, chose which tools to call ({calls} model "
+                                           f"call{'s' if calls != 1 else ''}) and wrote the reply"})
             decision: Decision | None = result.structured_output
             if decision is None:
                 raise ValueError("model returned no structured output")
@@ -414,6 +504,7 @@ class GuidedSession:
         at = 1 if blocks and blocks[0]["type"] == "criteria_chips" else 0
         blocks.insert(at, {"type": "text", "markdown": note})
         response["fallback"] = True
+        self._step("fallback", "Code (no model)", "The model didn't finish, so the cards come straight from the data")
         return response
 
     def _add_usage(self, metrics) -> None:
@@ -448,7 +539,10 @@ class GuidedSession:
         self.needs = [n for n in self.needs if n["need"] != need_id]
         if not event.get("removed"):
             self.needs.append({"need": need_id, "mode": event.get("mode", "prefer"), "value": event.get("value")})
+        started = time.perf_counter()
         self.last = search.find(self.needs, self.semantic_query)
+        self._trace_search(self.needs, started, set())
+        self._step("rerank", "Code (no model)", "Re-ranked in code without calling the model")
         self.agent.messages.append({"role": "user", "content": [{"text": f"(I changed my criteria: {json.dumps(event)})"}]})
         self.agent.messages.append({"role": "assistant", "content": [{"text": "Updated the results."}]})
         return self._blocks(None)
@@ -533,17 +627,27 @@ class GuidedSession:
         results = (self.last or {}).get("results", []) if show_results else []
         by_id = {r["school_id"]: r for r in results}
         programs = self.last_programs["programs"] if self.programs_fresh and self.last_programs else []
-        for callout in (decision.callouts if decision else []):
+        notes = decision.callouts if decision else []
+        dropped = 0
+        for callout in notes:
             r = by_id.get(callout.school_id)
             if r is None:  # the model may only point at schools the tool returned
+                dropped += 1
                 continue
             evidence = [e for c in r["criteria"] if c["status"] != N.CONFIRMED for e in c["evidence"]]
             evidence += [{"field": f["field"], "value": f["value"]} for f in r["quality_flags"]]
             if not evidence or not _grounded(callout.text, r, programs):
                 log.info("dropped ungrounded callout for %s: %s", r["school_id"], callout.text)
+                dropped += 1
                 continue
             blocks.append({"type": "evidence_callout", "school_id": r["school_id"], "text": callout.text,
                            "evidence": evidence})
+
+        if notes:
+            kept_notes = len(notes) - dropped
+            self._step("ground", "Code (no model)",
+                       f"Checked the agent's {len(notes)} note{'s' if len(notes) != 1 else ''} against the data: "
+                       f"{kept_notes} kept" + (f", {dropped} dropped (not backed by the data)" if dropped else ""))
 
         if self.programs_fresh and self.last_programs and self.last_programs["programs"]:
             blocks.append({"type": "program_results", "programs": self.last_programs["programs"],

@@ -131,6 +131,35 @@ type and renders them in order. The agent chooses which blocks to send.
 }
 ```
 
+### `trace` (top-level field, not a block)
+
+Every response also carries `trace`: what really ran this turn, in order, recorded by code as
+each tool returns (the model never writes it). Show it as a collapsible "How I checked this"
+list; it answers "is this an agent or a chatbot?" and shows which AWS service did what.
+
+```json
+"trace": {
+  "elapsed_ms": 9120,
+  "steps": [
+    {"tool": "understand", "service": "Claude Sonnet 5.5 on Amazon Bedrock",
+     "text": "Read your message, chose which tools to call (3 model calls) and wrote the reply"},
+    {"tool": "find_schools", "service": "Amazon OpenSearch + Titan Embeddings", "ms": 640,
+     "text": "Found 50 candidate schools for your grade and area, scored by your 4 needs and your own words (vector match)"},
+    {"tool": "verify", "service": "Code (no model)",
+     "text": "Checked 4 needs on the top 10 schools against the data: 28 confirmed, 7 partial, 5 missing. Flagged data problems at 2 schools"},
+    {"tool": "trade_offs", "service": "Code (no model)", "text": "Spotted 1 trade-off worth asking you about"},
+    {"tool": "search_programs", "service": "Amazon OpenSearch + Titan Embeddings", "ms": 410,
+     "text": "Searched programs for 'robotics club' near the school, covering 17:00–18:00: 1 with upcoming sessions"},
+    {"tool": "ground", "service": "Code (no model)", "text": "Checked the agent's 2 notes against the data: 2 kept"}
+  ]
+}
+```
+
+`tool` is one of `understand`, `find_schools`, `verify`, `trade_offs`, `keep_values`,
+`get_school_profile`, `find_school_by_name`, `lookup_content`, `search_programs`, `compare`,
+`ground`, `rerank` (chip edits, no model call) or `fallback`. `ms` is present for steps that call
+a service. Render `service` and `text` as given; new `tool` values may appear later.
+
 ### `criteria_chips`
 
 ```json

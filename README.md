@@ -119,7 +119,7 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvi
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/turn` | Query, answer a question, compare two schools, or edit a chip (see `docs/contract.md`) |
+| `POST /api/turn` | Query, answer a question, compare two schools, or edit a chip (see `docs/contract.md`). Every response includes a `trace` of the tools and AWS services that really ran |
 | `POST /api/turn/stream` | Same, as server-sent events: progress while the agent works, then the result |
 | `POST /api/saved`, `GET /api/saved?session_id=`, `DELETE /api/saved/{school_id}?session_id=` | Saved list; saving returns programs that fill that school's gaps |
 | `POST /api/feedback` | Thumbs up/down on a result |
@@ -131,7 +131,7 @@ Try it from the command line without the API: `PYTHONPATH=. ../.venv/bin/python 
 
 ## Evaluation
 
-`evals/cases.json` holds 33 parent queries across core searches, missing information, honesty,
+`evals/cases.json` holds 36 parent queries across core searches, missing information, honesty,
 different family needs, fairness, guide questions (P4), programs and edge cases. `evals/run_evals.py` runs them and checks needs
 extraction, questions, refusals, and that every school the agent names was returned by a tool.
 
@@ -143,15 +143,18 @@ Latest run on Claude Sonnet 5.5 (full table in [`evals/results/latest.md`](evals
 
 | Metric | Result |
 |---|---|
-| Cases passed | 33 / 33 |
-| Needs extracted correctly | 16 / 16 |
+| Cases passed | 36 / 36 |
+| Needs extracted correctly | 18 / 18 |
 | Made-up school mentions | 0 |
 | Guide answers citing a guide entry | 5 / 5 (and none for a term the guide lacks) |
 | Program cases (fill a gap, interest match, past-only excluded, nothing found) | 5 / 5 |
 | Errors | 0 |
-| Latency per turn | median 6.9 s, max 14.5 s |
-| Tokens per turn | ~12,400, 79% of input served from the prompt cache |
-| Estimated cost per turn | ~$0.025 with prompt caching, vs ~$0.047 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
+| Latency per turn | median 7.3 s, max 13.7 s |
+| Tokens per turn | ~14,400, 80% of input served from the prompt cache |
+| Estimated cost per turn | ~$0.027 with prompt caching, vs ~$0.054 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
+
+Vague requests ("a good elementary school in Miami", in English and Spanish) get one question about
+what the child needs: learning support, after-school care, a bus or counseling.
 
 In 5 of 5 runs, the demo query found the library robotics club that covers Tamarind Cove's
 5–6pm care gap and asked the parent whether that works.
@@ -162,7 +165,7 @@ Load test against the deployed URL: 8 parents searching at the same moment all g
 Other tests:
 
 ```bash
-cd agent && ../.venv/bin/pytest -q tests                  # 51 unit tests of verify rules, hints, programs, query building, fallback, cost, profile (no AWS needed)
+cd agent && ../.venv/bin/pytest -q tests                  # 60 unit tests of verify rules, hints, programs, query building, fallback, cost, profile, trace (no AWS needed)
 python3 evals/smoke_api.py https://<cloudfront-domain>    # 26 end-to-end API checks against a deployment, including streaming
 ```
 
