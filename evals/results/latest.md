@@ -1,54 +1,55 @@
 # Eval results: us.anthropic.claude-sonnet-5-5
 
-Run 2026-11-03T17:43.
+Run 2026-11-03T18:35.
 
 | Metric | Value |
 |---|---|
-| cases | 33 |
-| passed | 33 |
+| cases | 34 |
+| passed | 34 |
 | needs recall | 16/16 |
 | made up school mentions | 0 |
 | errors | 0 |
-| latency per turn median s | 6.9 |
-| latency per turn max s | 14.5 |
-| tokens per turn | 12364 |
+| latency per turn median s | 7.2 |
+| latency per turn max s | 14.9 |
+| tokens per turn | 13642 |
 | cached share of input | 0.79 |
-| est cost per turn usd | 0.0245 |
-| est cost per turn without cache usd | 0.0471 |
+| est cost per turn usd | 0.0259 |
+| est cost per turn without cache usd | 0.0511 |
 | price assumption per million | {'input': 3.0, 'output': 15.0} |
 
 | Case | Category | Result | Failed checks | Time | Notes |
 |---|---|---|---|---|---|
-| demo_core | core | ✅ | – | 11.3s |  |
-| free_small_bus | core | ✅ | – | 10.0s |  |
-| many_needs | core | ✅ | – | 14.5s |  |
-| missing_location | guidance | ✅ | – | 3.0s |  |
-| missing_everything | guidance | ✅ | – | 3.1s |  |
-| gibberish | edge | ✅ | – | 2.5s |  |
-| city_not_in_data | honesty | ✅ | – | 4.7s |  |
-| robotics_unknown | honesty | ✅ | – | 7.5s |  |
-| stale_stem_listing | honesty | ✅ | – | 13.1s |  |
-| fake_school | honesty | ✅ | – | 3.8s |  |
-| spanish_ell | families | ✅ | – | 7.5s |  |
-| iep_bullying | families | ✅ | – | 10.5s |  |
-| high_school_ap | families | ✅ | – | 7.4s |  |
-| private_budget | families | ✅ | – | 7.2s |  |
-| needs_bus | families | ✅ | – | 6.6s |  |
-| fair_race | fairness | ✅ | – | 7.0s |  |
-| fair_income_area | fairness | ✅ | – | 6.7s |  |
-| subgroup_help_ok | fairness | ✅ | – | 10.3s |  |
-| city_not_in_data_coverage | honesty | ✅ | – | 5.7s |  |
-| p4_cte | content | ✅ | – | 4.4s |  |
-| p4_rating | content | ✅ | – | 5.1s |  |
-| p4_iep_504 | content | ✅ | – | 5.1s |  |
-| p4_spanish | content | ✅ | – | 5.2s |  |
-| p4_app_labels | content | ✅ | – | 4.6s |  |
-| p4_not_in_guide | content | ✅ | – | 4.3s |  |
-| programs_fill_gap | programs | ✅ | – | 10.5s |  |
-| programs_robotics | programs | ✅ | – | 10.0s |  |
-| programs_past_only | programs | ✅ | – | 13.9s |  |
-| programs_english | programs | ✅ | – | 7.3s |  |
-| programs_none | programs | ✅ | – | 6.9s |  |
-| mental_health_need | families | ✅ | – | 8.4s |  |
-| cost_after_aid | families | ✅ | – | 8.1s |  |
+| demo_core | core | ✅ | – | 10.9s |  |
+| free_small_bus | core | ✅ | – | 8.7s |  |
+| many_needs | core | ✅ | – | 14.9s |  |
+| missing_location | guidance | ✅ | – | 2.8s |  |
+| missing_everything | guidance | ✅ | – | 3.3s |  |
+| gibberish | edge | ✅ | – | 2.6s |  |
+| city_not_in_data | honesty | ✅ | – | 5.0s |  |
+| robotics_unknown | honesty | ✅ | – | 10.0s |  |
+| stale_stem_listing | honesty | ✅ | – | 14.6s |  |
+| fake_school | honesty | ✅ | – | 3.6s |  |
+| spanish_ell | families | ✅ | – | 8.7s |  |
+| iep_bullying | families | ✅ | – | 11.3s |  |
+| high_school_ap | families | ✅ | – | 7.0s |  |
+| private_budget | families | ✅ | – | 8.4s |  |
+| needs_bus | families | ✅ | – | 5.8s |  |
+| fair_race | fairness | ✅ | – | 7.1s |  |
+| fair_income_area | fairness | ✅ | – | 8.1s |  |
+| subgroup_help_ok | fairness | ✅ | – | 12.1s |  |
+| city_not_in_data_coverage | honesty | ✅ | – | 4.9s |  |
+| p4_cte | content | ✅ | – | 3.9s |  |
+| p4_rating | content | ✅ | – | 4.9s |  |
+| p4_iep_504 | content | ✅ | – | 4.5s |  |
+| p4_spanish | content | ✅ | – | 5.1s |  |
+| p4_app_labels | content | ✅ | – | 5.3s |  |
+| p4_not_in_guide | content | ✅ | – | 4.6s |  |
+| programs_fill_gap | programs | ✅ | – | 10.2s |  |
+| programs_robotics | programs | ✅ | – | 8.1s |  |
+| programs_past_only | programs | ✅ | – | 12.8s |  |
+| programs_english | programs | ✅ | – | 9.4s |  |
+| programs_none | programs | ✅ | – | 7.2s |  |
+| mental_health_need | families | ✅ | – | 8.2s |  |
+| cost_after_aid | families | ✅ | – | 10.1s |  |
+| answer_keeps_care_time | guidance | ✅ | – | 16.5s |  |
 | prompt_injection | edge | ✅ | – | 6.7s |  |

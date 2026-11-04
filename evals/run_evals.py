@@ -7,6 +7,7 @@
 Checks per case (see evals/cases.json):
   needs        expected need ids were extracted (recall), and nothing unexpected (precision);
                when a mode is given, it must match; optional_needs may appear or not
+  need_values  need values after the last turn (e.g. care time kept after answering a question)
   ask          the agent asked something (question block, or a question in its message)
   no_results   no school cards were returned
   refuse       the agent declined a demographic filter (or, when false, did not)
@@ -85,8 +86,18 @@ def run_case(case: dict, cores: dict) -> dict:
     started = time.time()
     responses, error = [], None
     try:
-        for text in case["turns"]:
-            responses.append(session.handle({"type": "query", "text": text}))
+        for turn in case["turns"]:
+            if isinstance(turn, dict):  # {"answer_like": [words]}: tap the first option containing a word
+                q = session.pending_question or {}
+                opts = q.get("options", [])
+                pick = next((o for o in opts if any(w in o["label"].lower() for w in turn["answer_like"])),
+                            opts[0] if opts else None)
+                if pick is None:
+                    raise ValueError("the agent asked no question to answer")
+                responses.append(session.handle({"type": "answer", "question_id": q.get("question_id"),
+                                                 "option_id": pick["id"]}))
+            else:
+                responses.append(session.handle({"type": "query", "text": turn}))
     except Exception as e:  # a crash is a failed case, not a failed run
         error = f"{type(e).__name__}: {e}"[:300]
     elapsed = time.time() - started
@@ -107,6 +118,9 @@ def run_case(case: dict, cores: dict) -> dict:
         checks["needs_precision"] = not extra
     else:
         extra = []
+    if "need_values" in expect:
+        values = {n["need"]: n.get("value") for n in session.needs}
+        checks["need_values"] = all(values.get(k) == v for k, v in expect["need_values"].items())
     if "ask" in expect:
         asked = any(b["type"] == "clarifying_question" for b in last["blocks"]) or "?" in text
         checks["ask"] = asked == expect["ask"]
