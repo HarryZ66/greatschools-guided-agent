@@ -134,11 +134,17 @@ class AppStack(Stack):
             actions=["bedrock:InvokeModel"],  # Titan embeddings for the guide and program searches
             resources=[f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-embed-text-v2:0"]))
 
+        # The service may assume this role only on behalf of this gateway (AWS's confused deputy
+        # guidance: tie the trust to the gateway's ARN as well as the account)
+        gateway_name = "greatschools-tools"
         gateway_role = iam.Role(self, "GatewayRole", assumed_by=iam.ServicePrincipal(
-            "bedrock-agentcore.amazonaws.com", conditions={"StringEquals": {"aws:SourceAccount": self.account}}))
+            "bedrock-agentcore.amazonaws.com", conditions={
+                "StringEquals": {"aws:SourceAccount": self.account},
+                "ArnLike": {"aws:SourceArn":
+                            f"arn:aws:bedrock-agentcore:{self.region}:{self.account}:gateway/{gateway_name}-*"}}))
         tools_fn.grant_invoke(gateway_role)
         gateway = agentcore.CfnGateway(
-            self, "ToolsGateway", name="greatschools-tools", protocol_type="MCP", authorizer_type="AWS_IAM",
+            self, "ToolsGateway", name=gateway_name, protocol_type="MCP", authorizer_type="AWS_IAM",
             role_arn=gateway_role.role_arn, description="GreatSchools data tools for the guided search agent")
         gateway.node.add_dependency(gateway_role)
         tools_target = agentcore.CfnGatewayTarget(
@@ -157,6 +163,14 @@ class AppStack(Stack):
         tools_target.node.add_dependency(gateway_role)
         runtime_role.add_to_principal_policy(iam.PolicyStatement(
             actions=["bedrock-agentcore:InvokeGateway"], resources=[gateway.attr_gateway_arn]))
+        # The gateway's own side of that mapping: a resource policy naming the runtime role as the
+        # caller allowed to invoke it
+        agentcore.CfnResourcePolicy(
+            self, "ToolsGatewayResourcePolicy", resource_arn=gateway.attr_gateway_arn,
+            policy=Stack.of(self).to_json_string({"Version": "2012-10-17", "Statement": [{
+                "Sid": "AgentRuntimeInvoke", "Effect": "Allow",
+                "Principal": {"AWS": runtime_role.role_arn},
+                "Action": "bedrock-agentcore:InvokeGateway", "Resource": gateway.attr_gateway_arn}]}))
 
         runtime = agentcore.CfnRuntime(
             self, "AgentRuntime",
@@ -211,25 +225,30 @@ class AppStack(Stack):
         transaction_search = xray.CfnTransactionSearchConfig(self, "TransactionSearch", indexing_percentage=100)
         transaction_search.add_dependency(xray_policy)
 
-        runtime_app_logs = logs.LogGroup(self, "AgentRuntimeAppLogs", retention=logs.RetentionDays.TWO_WEEKS,
-                                         removal_policy=RemovalPolicy.DESTROY)
-        for log_type, destination in (
-            ("APPLICATION_LOGS", logs.CfnDeliveryDestination(
-                self, "RuntimeLogsDestination", name="greatschools-runtime-logs",
-                delivery_destination_type="CWL", destination_resource_arn=runtime_app_logs.log_group_arn)),
-            ("TRACES", logs.CfnDeliveryDestination(
-                self, "RuntimeTracesDestination", name="greatschools-runtime-traces",
-                delivery_destination_type="XRAY")),
+        # The runtime and the gateway each deliver their logs and traces
+        for kind, resource_arn, app_logs_id in (
+            ("Runtime", runtime.attr_agent_runtime_arn, "AgentRuntimeAppLogs"),
+            ("Gateway", gateway.attr_gateway_arn, "GatewayAppLogs"),
         ):
-            source = logs.CfnDeliverySource(
-                self, f"Runtime{log_type.title().replace('_', '')}Source",
-                name=f"greatschools-runtime-{log_type.lower().replace('_', '-')}",
-                log_type=log_type, resource_arn=runtime.attr_agent_runtime_arn)
-            delivery = logs.CfnDelivery(self, f"Runtime{log_type.title().replace('_', '')}Delivery",
-                                        delivery_source_name=source.name,
-                                        delivery_destination_arn=destination.attr_arn)
-            delivery.add_dependency(source)
-            delivery.add_dependency(transaction_search)
+            app_logs = logs.LogGroup(self, app_logs_id, retention=logs.RetentionDays.TWO_WEEKS,
+                                     removal_policy=RemovalPolicy.DESTROY)
+            for log_type, destination in (
+                ("APPLICATION_LOGS", logs.CfnDeliveryDestination(
+                    self, f"{kind}LogsDestination", name=f"greatschools-{kind.lower()}-logs",
+                    delivery_destination_type="CWL", destination_resource_arn=app_logs.log_group_arn)),
+                ("TRACES", logs.CfnDeliveryDestination(
+                    self, f"{kind}TracesDestination", name=f"greatschools-{kind.lower()}-traces",
+                    delivery_destination_type="XRAY")),
+            ):
+                source = logs.CfnDeliverySource(
+                    self, f"{kind}{log_type.title().replace('_', '')}Source",
+                    name=f"greatschools-{kind.lower()}-{log_type.lower().replace('_', '-')}",
+                    log_type=log_type, resource_arn=resource_arn)
+                delivery = logs.CfnDelivery(self, f"{kind}{log_type.title().replace('_', '')}Delivery",
+                                            delivery_source_name=source.name,
+                                            delivery_destination_arn=destination.attr_arn)
+                delivery.add_dependency(source)
+                delivery.add_dependency(transaction_search)
 
         # One task: conversations live on AgentCore Runtime (see agent/gs_agent/api.py).
         service = ecs_patterns.ApplicationLoadBalancedFargateService(
