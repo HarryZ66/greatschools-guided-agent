@@ -5,3 +5,5 @@ botocore[crt]>=1.40
 opensearch-py>=2.8,<4
 fastapi>=0.115
 uvicorn>=0.30
+aws-opentelemetry-distro>=0.10
+mcp>=2.3,<2.4

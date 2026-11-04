@@ -31,7 +31,7 @@ def test_concrete_time_gap_is_the_top_hint_and_suggests_programs():
 def test_must_have_confirmed_nowhere_produces_relax_hint():
     results = [result("a", "A", 1, N.MISSING, N.CONFIRMED), result("b", "B", 2, N.MISSING, N.CONFIRMED)]
     hints, _ = question_hints(NEEDS, results)
-    assert any("No result confirms the must-have 'STEM'" in h for h in hints)
+    assert any("No result confirms the must-have 'STEM (science, tech, math)'" in h for h in hints)
 
 
 def test_no_hints_when_everything_is_confirmed():

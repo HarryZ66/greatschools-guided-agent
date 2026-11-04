@@ -1,6 +1,12 @@
 """HTTP API for the parent app. Endpoints and payloads follow docs/contract.md, section 3.
 
     cd agent && PYTHONPATH=. uvicorn gs_agent.api:app --port 8000
+
+The same app runs in two places (docs/decisions.md, 025):
+- on Fargate as the public API. With AGENT_RUNTIME_ARN set, it runs agent turns, and anything that
+  needs a conversation's state, on AgentCore Runtime instead of in this process;
+- on Amazon Bedrock AgentCore Runtime (RUNNING_ON=agentcore, port 8080), where `/ping` and
+  `/invocations` serve those calls, one AgentCore session per parent's conversation.
 """
 
 import json
@@ -9,6 +15,7 @@ import os
 import queue
 import threading
 import time
+import uuid
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,9 +24,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import profile, programs, search, store
+from . import runtime_client as rc
 from .agent import GuidedSession
 
 log = logging.getLogger("gs_agent.api")
+ON_AGENTCORE = os.environ.get("RUNNING_ON") == "agentcore"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 app = FastAPI(title="GreatSchools Guided Agent API")
@@ -61,7 +70,7 @@ def _session(session_id: str | None) -> GuidedSession:
 
 
 class Event(BaseModel):
-    type: Literal["query", "answer", "compare", "chip_edit"]
+    type: Literal["query", "answer", "compare", "chip_edit", "new_search"]
     text: str | None = None
     question_id: str | None = None
     option_id: str | None = None
@@ -83,9 +92,11 @@ class SaveRequest(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
+    """A thumbs vote on one agent reply (`turn`, from the response) or on one school (`school_id`)."""
     session_id: str
-    school_id: str
     vote: Literal["up", "down"]
+    turn: int | None = None
+    school_id: str | None = None
 
 
 @app.get("/api/health")
@@ -107,13 +118,42 @@ def _run_turn(session: GuidedSession, event: Event) -> dict:
             store.record_search(session.session_id, len(session.needs), len(session.last["results"]))
         except Exception:
             log.exception("could not record search metric")
+    if event.type == "new_search":  # the app shows the kept list right away
+        try:
+            response["saved"] = store.saved_schools(session.session_id)
+        except Exception:
+            log.exception("could not load saved schools for %s", session.session_id)
+            response["saved"] = [{"school_id": i, "name": None, "at": None} for i in sorted(session.saved)]
     response["elapsed_ms"] = int((time.time() - started) * 1000)
+    if ON_AGENTCORE and isinstance(response.get("trace"), dict):
+        response["trace"]["steps"].insert(0, {
+            "tool": "runtime", "service": "Amazon Bedrock AgentCore Runtime",
+            "text": "Ran this turn in your own AgentCore Runtime session, which keeps our conversation between turns"})
+    # Numbers this session's replies, so the parent can rate a reply (POST /api/feedback with `turn`)
+    session.turn_count = getattr(session, "turn_count", 0) + 1
+    response["turn"] = session.turn_count
     log.info("turn %s %s %dms", session.session_id, event.type, response["elapsed_ms"])
     return response
 
 
+def _remote(op: str, session_id: str, body: dict) -> dict:
+    """Run one operation on the conversation's AgentCore Runtime session."""
+    try:
+        return rc.invoke(op, session_id, body)
+    except rc.RuntimeCallError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+def _remote_turn_body(request: TurnRequest) -> tuple[str, dict]:
+    # The API names new conversations, so the first turn already has an AgentCore session id
+    session_id = request.session_id or uuid.uuid4().hex[:12]
+    return session_id, {"request": {"session_id": session_id, "event": request.event.model_dump(exclude_none=True)}}
+
+
 @app.post("/api/turn")
 def turn(request: TurnRequest) -> dict:
+    if rc.enabled():
+        return _remote("turn", *_remote_turn_body(request))
     return _run_turn(_session(request.session_id), request.event)
 
 
@@ -122,6 +162,8 @@ def turn_stream(request: TurnRequest) -> StreamingResponse:
     """Same as /api/turn, as server-sent events: `progress` events while the agent works
     (the "I checked this for you" trace), then one `result` event, or an `error` event.
     From Sanchit's PR #1."""
+    if rc.enabled():
+        return _remote_stream(*_remote_turn_body(request))
     session = _session(request.session_id)
     events: queue.Queue = queue.Queue()
 
@@ -143,7 +185,27 @@ def turn_stream(request: TurnRequest) -> StreamingResponse:
 
     def stream():
         while (item := events.get()) is not None:
-            yield f"event: {item['type']}\ndata: {json.dumps(item)}\n\n"
+            yield _sse(item)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _sse(item: dict) -> str:
+    return f"event: {item['type']}\ndata: {json.dumps(item)}\n\n"
+
+
+def _remote_stream(session_id: str, body: dict) -> StreamingResponse:
+    """A streamed turn on AgentCore Runtime: its server-sent events pass through unchanged."""
+    def stream():
+        try:
+            yield from rc.invoke_stream(session_id, body)
+        except rc.RuntimeCallError as e:
+            yield _sse({"type": "error", "status": e.status, "detail": e.detail})
+        except Exception:
+            log.exception("streamed AgentCore turn failed for %s", session_id)
+            yield _sse({"type": "error", "status": 502,
+                        "detail": "Something went wrong on our side. Please try again, or start a new search."})
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -151,6 +213,8 @@ def turn_stream(request: TurnRequest) -> StreamingResponse:
 
 @app.post("/api/saved")
 def save(request: SaveRequest) -> dict:
+    if rc.enabled():  # programs for this school depend on the conversation's needs
+        return _remote("save", request.session_id, {"request": request.model_dump()})
     school = search.get_school(request.school_id)
     if school is None:
         raise HTTPException(status_code=404, detail="Unknown school")
@@ -175,6 +239,8 @@ def list_saved(session_id: str) -> dict:
 
 @app.delete("/api/saved/{school_id}")
 def unsave(school_id: str, session_id: str) -> dict:
+    if rc.enabled():
+        return _remote("unsave", session_id, {"school_id": school_id, "session_id": session_id})
     store.unsave_school(session_id, school_id)
     if session_id in _sessions:
         _sessions[session_id].saved.discard(school_id)
@@ -183,7 +249,9 @@ def unsave(school_id: str, session_id: str) -> dict:
 
 @app.post("/api/feedback")
 def feedback(request: FeedbackRequest) -> dict:
-    store.record_feedback(request.session_id, request.school_id, request.vote)
+    if request.turn is None and not request.school_id:
+        raise HTTPException(status_code=400, detail="Send the reply's turn or a school_id")
+    store.record_feedback(request.session_id, request.vote, school_id=request.school_id, turn=request.turn)
     return {"ok": True}
 
 
@@ -193,6 +261,8 @@ def school_profile(school_id: str, session_id: str | None = None) -> dict:
 
     With a session_id, the profile checks that parent's needs, the same way the cards do.
     """
+    if session_id and rc.enabled():
+        return _remote("profile", session_id, {"school_id": school_id, "session_id": session_id})
     school = search.get_school(school_id)
     if school is None:
         raise HTTPException(status_code=404, detail="Unknown school")
@@ -204,3 +274,33 @@ def school_profile(school_id: str, session_id: str | None = None) -> dict:
 @app.get("/api/metrics")
 def get_metrics() -> dict:
     return store.metrics()
+
+
+# ------------------------------------------------ Amazon Bedrock AgentCore Runtime service contract
+
+@app.get("/ping")
+def ping() -> dict:
+    return {"status": "HealthyBusy" if any(lock.locked() for lock in _locks.values()) else "Healthy"}
+
+
+@app.post("/invocations")
+def invocations(payload: dict):
+    """Calls from the public API (runtime_client.py): {"op": ..., ...}.
+
+    Errors come back as {"_error": {status, detail}} so the API can pass them on to the parent app.
+    """
+    op = payload.get("op")
+    try:
+        if op == "turn":
+            return turn(TurnRequest(**payload["request"]))
+        if op == "turn_stream":
+            return turn_stream(TurnRequest(**payload["request"]))
+        if op == "save":
+            return save(SaveRequest(**payload["request"]))
+        if op == "unsave":
+            return unsave(payload["school_id"], payload["session_id"])
+        if op == "profile":
+            return school_profile(payload["school_id"], payload["session_id"])
+        raise HTTPException(status_code=400, detail=f"Unknown operation: {op}")
+    except HTTPException as e:
+        return {"_error": {"status": e.status_code, "detail": e.detail}}

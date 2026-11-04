@@ -48,7 +48,8 @@ For every school × need, `verify_criteria` returns one status:
 - Reviews (`reviews_full[].created_date`): reviews over 3 years old don't count toward
   `confirmed`, and the UI labels them "older review".
 
-**Data quality flags** (the value is shown but not used for ranking)
+**Data quality flags** (the value is shown but not used for a status; each flag takes 0.02 off the
+school's `score`, at most 3, so a clean school with the same checks ranks first)
 - `enrollment` of 0 or 1
 - `student_teacher_ratio` over 40
 - A school `start_time` in the PM, or an `end_time` in the AM
@@ -90,8 +91,16 @@ Event types:
 | `answer` | `question_id`, `option_id` or `text` | Yes |
 | `compare` | `school_ids` (2) | Yes |
 | `chip_edit` | `need`, `mode` (require/prefer/avoid) or `removed: true` | No: code re-runs search and verify |
+| `new_search` | none | No: forgets the conversation, keeps the session and its saved list; the response adds `saved` |
 
 Omit `session_id` on the first turn; every response returns the `session_id` to send next time.
+
+**Remembering the parent's list** (login is out of scope, so the session id stands in for the
+signed-in parent): store `session_id` in `localStorage`. On page load, if one is stored, call
+`GET /api/saved?session_id=…` to show My list, and send it with the next turn. It works after a
+server restart too, because saves live in DynamoDB. For "New search", send
+`{"session_id": <stored>, "event": {"type": "new_search"}}` instead of dropping the id; the
+response is `{"session_id", "blocks": [], "saved": [...], "trace": ...}`.
 
 `POST /api/turn/stream` takes the same body and answers with server-sent events: zero or more
 `progress` events (`{"type": "progress", "text": "Checked 10 schools; ranking the top 8."}`), then
@@ -109,12 +118,24 @@ Saving and feedback skip the agent entirely:
   ("Care at Tamarind Cove ends at 5:00 PM. After-School Homework Help … runs 3:30 PM–6:00 PM …").
 - `GET /api/saved?session_id=…` → `{saved: [{school_id, name, at}]}`
 - `DELETE /api/saved/{school_id}?session_id=…` → `{saved: [...]}`
-- `POST /api/feedback`: `{session_id, school_id, vote: "up" | "down"}`
+- `POST /api/feedback`: `{session_id, turn, vote: "up" | "down"}` rates one agent reply ("Helpful?"
+  under each reply), where `turn` is the number that reply's response carried. `{session_id, school_id, vote}`
+  still rates one school. Send one of the two; a new vote replaces the old one. Both count toward
+  `relevance` in `/api/metrics`.
 - `GET /api/schools/{school_id}?session_id=…`: the school record plus a verified `profile` (P3):
   `criteria` (that session's needs, same rules as the cards), `quality_flags`, `reviews`
   (`by_topic` recent/older counts, up to 3 dated `excerpts` marked `older` past 3 years, `total`),
   `terms` (guide entries that explain fields on the page) and `cost`. No model call.
 - `GET /api/metrics`: `{searches, saves, saves_to_searches, thumbs_up, thumbs_down, relevance, criteria_per_search}`
+
+`new_search` also clears guide citation history, including knowledge-base document names, so a
+fresh conversation only cites documents retrieved in that conversation. It keeps the existing
+AgentCore runtime session id and returns the saved list through both turn endpoints.
+
+In the deployed app, agent turns, saves and session profiles run on Amazon Bedrock AgentCore Runtime
+(decision 025); the endpoints and payloads above don't change. Internally the runtime serves
+`GET /ping` and `POST /invocations` with `{"op": "turn" | "turn_stream" | "save" | "unsave" | "profile", ...}`;
+errors come back as `{"_error": {status, detail}}` and the API passes them on unchanged.
 
 A `compare` turn returns `criteria_chips` and a `comparison` block (no `school_results`);
 the comparison's `summary` is the agent's one-line take.
@@ -127,9 +148,18 @@ type and renders them in order. The agent chooses which blocks to send.
 ```json
 {
   "session_id": "abc123",
+  "turn": 3,
   "blocks": [ ... ]
 }
 ```
+
+`turn` numbers the replies in a session (1, 2, 3…), so the parent can rate one with `/api/feedback`.
+
+**Plain words.** Parents often don't know school terms (decision 024). Chip labels, suggestions,
+question options and code-written notes use everyday words: no acronyms such as IEP, 504, ELL or
+ESA, distances in miles ("About 6.3 miles from Hialeah."), ratings as "4 out of 10". The backend drops
+asides like "(IEP/504)" from model-written labels. Evidence `field` names stay as they are (they point
+at the data); show the `note` to parents, not the field.
 
 ### `trace` (top-level field, not a block)
 
@@ -242,7 +272,7 @@ come from code; programs with only past sessions are never listed (they are name
   "programs": [{
     "program_id": "fl-912345", "name": "After-School Robotics Club",
     "organization": "Coral Lantern Branch Library", "city": "Miami",
-    "distance_km": 1.0, "near": "Tamarind Cove STEM Academy", "meets_on": ["Mon", "Tue", "Wed", "Thu"],
+    "distance_km": 1.0, "distance_miles": 0.6, "near": "Tamarind Cove STEM Academy", "meets_on": ["Mon", "Tue", "Wed", "Thu"],
     "next_sessions": [{"date": "2026-11-03", "day": "Tue", "start": "17:00", "end": "18:30"}],
     "ages": "Ages 10-14", "cost": "Free", "registration_open": true,
     "time_fit": {"status": "confirmed", "note": "Runs 17:00-18:30, covering 17:00-18:00."},
@@ -284,11 +314,13 @@ The estimate subtracts the state scholarship's average award; always show it as 
 ### `text`
 
 Plain answer, e.g. a term definition. `sources` is present when the answer comes from the
-parent guide (P4); it lists only entries the `lookup_content` tool actually returned.
+parent guide (P4); it lists only entries the `lookup_content` tool actually returned. When the
+guide is the Bedrock Knowledge Base (decision 028), each source also has `document`: the name of
+the file in S3 that the entry was retrieved from.
 
 ```json
 {"type": "text", "markdown": "A charter school is a free public school run by its own board…",
- "sources": [{"id": "charter-school", "title": "Charter school"}]}
+ "sources": [{"id": "charter-school", "title": "Charter school", "document": "charter-school.md"}]}
 ```
 
 ## 5. Rules the backend enforces

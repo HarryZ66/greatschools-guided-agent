@@ -36,11 +36,12 @@ def _time_fit(sessions: list[dict], time_from: str | None, time_to: str | None) 
     if not (time_from and time_to) or not sessions:
         return None
     start, end = sessions[0]["start"], sessions[0]["end"]
+    runs, gap = f"Runs {N.clock(start)}–{N.clock(end)}", f"{N.clock(time_from)}–{N.clock(time_to)}"
     if start <= time_from and end >= time_to:
-        return {"status": N.CONFIRMED, "note": f"Runs {start}-{end}, covering {time_from}-{time_to}."}
+        return {"status": N.CONFIRMED, "note": f"{runs}, covers {gap}."}
     if start < time_to and end > time_from:
-        return {"status": N.PARTIAL, "note": f"Runs {start}-{end}; only part of {time_from}-{time_to}."}
-    return {"status": N.ATTENTION, "note": f"Runs {start}-{end}, outside {time_from}-{time_to}."}
+        return {"status": N.PARTIAL, "note": f"{runs}; covers only part of {gap}."}
+    return {"status": N.ATTENTION, "note": f"{runs}, outside {gap}."}
 
 
 def _flags(program: dict) -> list[dict]:
@@ -70,9 +71,7 @@ NEED_INTEREST = {
 GAP_WORDING = {N.MISSING: "doesn't list", N.PARTIAL: "only partly offers", N.ATTENTION: "falls short on"}
 
 
-def _clock(hhmm: str) -> str:
-    h, m = map(int, hhmm.split(":"))
-    return f"{(h - 1) % 12 + 1}:{m:02d} {'AM' if h < 12 else 'PM'}"
+_clock = N.clock
 
 
 def _school_day_end(school: dict) -> str:
@@ -122,7 +121,7 @@ def for_saved_school(school_id: str, school: dict, needs: list[dict], size: int 
             else:
                 gap = f"{school['name']} {GAP_WORDING.get(check['status'], 'may not offer')} {label}."
             why = (f"{gap} {p['name']} at {p['organization']} runs {_clock(session['start'])}–{_clock(session['end'])} "
-                   f"on {', '.join(p['meets_on'])}, {p['distance_km']} km away ({p['cost'].lower()}).")
+                   f"on {', '.join(p['meets_on'])}, {p.get('distance_miles') or N.km_to_miles(p['distance_km'])} miles away ({p['cost'].lower()}).")
             picks.append({**p, "fills_need": need["need"], "why": why})
             break  # one program per gap
     picks.sort(key=lambda p: (p["cost"] != "Free", p["distance_km"], p["next_sessions"][0]["date"]))
@@ -179,6 +178,7 @@ def find_programs(interest: str = "", city: str = "", near_school_id: str = "", 
         programs.append({
             "program_id": h["_id"], "name": p["name"], "organization": org.get("name"), "city": p.get("city"),
             "distance_km": round(N.haversine_km(center, p["location"]), 1),
+            "distance_miles": N.km_to_miles(N.haversine_km(center, p["location"])),
             "near": anchor, "meets_on": _weekdays(p), "next_sessions": sessions, "ages": p.get("age_display"),
             "cost": p.get("cost_display") or "Not listed", "registration_open": p.get("has_available_registration"),
             "tags": p.get("tag_names", []), "description": p.get("description", "")[:300],

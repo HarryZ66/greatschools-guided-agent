@@ -14,5 +14,9 @@ COPY gs_agent ./gs_agent
 RUN useradd --create-home --uid 1000 app
 USER app
 
-EXPOSE 8000
-CMD ["uvicorn", "gs_agent.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Fargate serves the public API on 8000; AgentCore Runtime sets PORT=8080 (its service contract).
+# On AgentCore, opentelemetry-instrument (AWS Distro for OpenTelemetry) sends the agent's traces,
+# spans and logs to CloudWatch for AgentCore Observability (decision 026).
+ENV PORT=8000
+EXPOSE 8000 8080
+CMD ["sh", "-c", "if [ \"$RUNNING_ON\" = agentcore ]; then set -- opentelemetry-instrument; fi; exec \"$@\" uvicorn gs_agent.api:app --host 0.0.0.0 --port \"$PORT\" --workers 1"]

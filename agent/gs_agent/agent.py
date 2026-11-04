@@ -20,6 +20,8 @@ from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models import BedrockModel, CacheConfig
 
+from . import gateway_client as G
+from . import knowledge
 from . import needs as N
 from . import programs as P
 from . import search
@@ -114,6 +116,8 @@ How you work:
 1. Turn what the parent says into needs from the catalog below, each with a mode:
    require (must have), prefer (nice to have) or avoid. grade_level and location are always required.
    Infer needs from plain words ("my 6th grader" -> grade_level ["m"]; "I work until 6" -> after_school_care "18:00").
+   If the parent gives only a ZIP code for where they live, put it in location as "zip" and leave out
+   city: never guess the city from a ZIP. Code finds the area from our own data.
 2. If grade level or location is unknown, don't search: ask for it, and still return chips for the
    needs you already know. If find_schools says a city isn't in our data, describe where we do have
    schools from its cities_with_data list (name the areas with the most schools), never from memory.
@@ -134,7 +138,7 @@ How you work:
    Help the parent find what matters: if they gave little beyond grade and location (e.g. "a good
    elementary school in Miami") and there are no question_hints, still search, then ask ONE question
    about what their child needs, because parents often don't know these can be checked. Offer the
-   3-4 options most likely for this family from: learning support (IEP or 504), after-school care,
+   3-4 options most likely for this family from: extra help with learning, after-school care,
    a school bus, counseling support, strong academics, small classes. If grade or location is
    missing, ask for that first (rule 2) and offer 1-2 of these as suggestions instead.
 5. When the parent asks about one school, use get_school_profile with its school_id. If the school
@@ -162,6 +166,14 @@ Honesty rules:
 - When data is missing or old, say so plainly and suggest asking the school.
 - Don't list the schools in your message; the app shows cards built from the tool results.
 - Write at a 6th-grade reading level. Answer in the parent's language.
+
+Plain words (many parents don't know school terms; this is a core goal of the app):
+- Chip labels, suggestions, questions, why text and answer options use everyday words only. No
+  acronyms or school-system terms: say "extra help with learning", not "IEP", "504" or "special ed";
+  "help learning English", not "ELL"; "a state scholarship", not "FES-EO" or "ESA".
+- In messages, use the everyday words too. Use a term only if the parent used it or asked about it,
+  and then explain it in the same sentence ("a written plan for extra help, called an IEP").
+- Say distances in miles, as the data notes do, and ratings as "4 out of 10".
 
 Fairness rule (fair housing):
 - Never filter, rank or recommend schools or neighborhoods by the race, ethnicity, national origin,
@@ -195,6 +207,7 @@ class GuidedSession:
         self.chip_labels: dict[str, ChipLabel] = {}  # the agent's wording, kept across chip edits
         self.seen_ids: set[str] = set()  # every school a tool returned; evals check the model stays inside it
         self.seen_content: dict[str, str] = {}  # guide entry id -> title, for sources the model may cite
+        self.seen_documents: dict[str, str] = {}  # guide entry id -> knowledge base document it came from
         self.last_programs: dict | None = None
         self.programs_fresh = False  # show program cards only on the turn they were searched
         self.seen_programs: set[str] = set()
@@ -247,7 +260,8 @@ class GuidedSession:
         flagged = sum(1 for res in results if res["quality_flags"])
         self._step("verify", "Code (no model)",
                    f"Checked {len(needs)} needs on the top {len(results)} schools against the data: {tally}"
-                   + (f". Flagged data problems at {flagged} school{'s' if flagged != 1 else ''}" if flagged else ""))
+                   + (f". Flagged data problems at {flagged} school{'s' if flagged != 1 else ''} and ranked "
+                      f"{'them' if flagged != 1 else 'it'} lower" if flagged else ""))
         hints = r.get("question_hints") or []
         if hints:
             self._step("trade_offs", "Code (no model)",
@@ -279,6 +293,18 @@ class GuidedSession:
     # Tools are closures so each session keeps its own last search.
     def _tools(self) -> list:
         session = self
+
+        def service(backend: str) -> str:
+            # Data lookups go through the AgentCore Gateway's MCP tools when it is configured (decision 027)
+            return f"{G.SERVICE} → {backend}" if G.enabled() else backend
+
+        def lookup(tool_name: str, args: dict, backend: str, started: float):
+            """Run a data tool; on a Gateway failure, record it and return None."""
+            try:
+                return G.call(tool_name, args)
+            except G.GatewayError:
+                session._step(tool_name, service(backend), "The lookup failed, so I didn't use it", started)
+                return None
 
         @tool
         def find_schools(needs: list[dict], semantic_query: str = "") -> str:
@@ -320,14 +346,14 @@ class GuidedSession:
                 session._step("get_school_profile", "Agent", "Stopped: tool limit for this turn reached")
                 return stop
             started = time.perf_counter()
-            school = search.get_school(school_id)
+            school = lookup("get_school", {"school_id": school_id}, "Amazon OpenSearch", started)
             if school is None:
-                session._step("get_school_profile", "Amazon OpenSearch", f"No school with id {school_id}", started)
+                session._step("get_school_profile", service("Amazon OpenSearch"), f"No school with id {school_id}", started)
                 return json.dumps({"error": f"No school with id {school_id}"})
             session.progress(f"Reading the profile for {school.get('name', school_id)}…")
             session.seen_ids.add(school_id)
             criteria = [N.verify(school, n) for n in copy.deepcopy(session.needs)]
-            session._step("get_school_profile", "Amazon OpenSearch",
+            session._step("get_school_profile", service("Amazon OpenSearch"),
                           f"Read the profile for {school.get('name', school_id)} and checked "
                           f"{len(criteria)} of your needs against its data", started)
             keep = {k: v for k, v in school.items() if k not in ("reviews_full", "reviews_text", "profile_text")}
@@ -345,8 +371,10 @@ class GuidedSession:
                 return stop
             started = time.perf_counter()
             session.progress(f"Looking up '{name}'…")
-            matches = search.find_by_name(name)
-            session._step("find_school_by_name", "Amazon OpenSearch",
+            matches = lookup("find_school_by_name", {"name": name}, "Amazon OpenSearch", started)
+            if matches is None:
+                return json.dumps({"matches": [], "note": "The lookup failed; ask the parent to try again."})
+            session._step("find_school_by_name", service("Amazon OpenSearch"),
                           f"Looked up '{name}': {len(matches)} school{'s' if len(matches) != 1 else ''} with that name"
                           if matches else f"Looked up '{name}': no school with that name in our data", started)
             session.seen_ids.update(m["school_id"] for m in matches)
@@ -368,15 +396,25 @@ class GuidedSession:
                 return stop
             started = time.perf_counter()
             session.progress("Checking the parent guide…")
-            entries = search.lookup_content(question)
-            session._step("lookup_content", "Amazon OpenSearch + Titan Embeddings",
-                          "Searched the parent guide: " + (", ".join(e["title"] for e in entries) if entries
+            # The guide is a Bedrock Knowledge Base when KNOWLEDGE_BASE_ID is set (decision 028)
+            backend = knowledge.SERVICE if knowledge.enabled() else "Amazon OpenSearch + Titan Embeddings"
+            entries = lookup("lookup_guide", {"question": question}, backend, started)
+            if entries is None:
+                return json.dumps({"entries": [], "note": "The guide lookup failed; don't answer from memory."})
+
+            def named(e: dict) -> str:
+                return f"{e['title']} ({e['document']})" if e.get("document") else e["title"]
+
+            session._step("lookup_content", service(backend),
+                          "Searched the parent guide: " + (", ".join(named(e) for e in entries) if entries
                                                            else "no entry covers this, so I won't answer from memory"),
                           started)
             session.seen_content.update({e["id"]: e["title"] for e in entries})
+            session.seen_documents.update({e["id"]: e["document"] for e in entries if e.get("document")})
             if not entries:
                 return json.dumps({"entries": [], "note": "No guide entry covers this."})
-            return json.dumps({"entries": [{k: e[k] for k in ("id", "title", "body", "source")} for e in entries]})
+            return json.dumps({"entries": [{k: e[k] for k in ("id", "title", "body", "source", "document") if k in e}
+                                           for e in entries]})
 
         @tool
         def search_programs(interest: str, city: str = "", near_school_id: str = "", grades: list[str] | None = None,
@@ -397,17 +435,21 @@ class GuidedSession:
                 return stop
             started = time.perf_counter()
             session.progress(f"Looking for nearby programs: {interest}…")
-            found = P.find_programs(interest, city, near_school_id, grades, time_from, time_to)
+            found = lookup("search_programs", {"interest": interest, "city": city, "near_school_id": near_school_id,
+                                               "grades": grades, "time_from": time_from, "time_to": time_to},
+                           "Amazon OpenSearch + Titan Embeddings", started)
+            if found is None:
+                return json.dumps({"programs": [], "note": "The program search failed."})
             n, past = len(found["programs"]), found["excluded_past"]
             where = "near the school" if near_school_id else f"in {city}" if city else "nearby"
             gap = f", covering {time_from}–{time_to}" if time_from and time_to else ""
-            session._step("search_programs", "Amazon OpenSearch + Titan Embeddings",
+            session._step("search_programs", service("Amazon OpenSearch + Titan Embeddings"),
                           f"Searched programs for '{interest}' {where}{gap}: {n} with upcoming sessions"
                           + (f"; skipped {len(past)} with only past sessions" if past else ""), started)
             session.last_programs, session.programs_fresh = found, True
             session.seen_programs.update(p["program_id"] for p in found["programs"])
             return json.dumps({
-                "programs": [{k: p[k] for k in ("program_id", "name", "organization", "city", "distance_km", "near",
+                "programs": [{k: p[k] for k in ("program_id", "name", "organization", "city", "distance_km", "distance_miles", "near",
                                                 "meets_on", "next_sessions", "ages", "cost", "registration_open", "time_fit",
                                                 "quality_flags")} for p in found["programs"]],
                 "excluded_past": found["excluded_past"], "notes": found["notes"],
@@ -447,7 +489,26 @@ class GuidedSession:
                 "what the real difference is for my family. No question unless a choice really depends on it.")
         if kind == "chip_edit":
             return self._chip_edit(event)
+        if kind == "new_search":
+            return self._new_search()
         raise ValueError(f"Unknown event type: {kind}")
+
+    def _new_search(self) -> dict:
+        """Start over with the same parent: forget the conversation, keep the session and saved list.
+
+        The app stores session_id in the browser, so a parent's list survives a page refresh and a
+        "New search" (login is out of scope; the session id stands in for the signed-in parent).
+        """
+        self.needs, self.semantic_query, self.last = [], None, None
+        self.pending_question, self.comparison, self.chip_labels = None, None, {}
+        self.seen_ids, self.seen_content, self.seen_programs = set(), {}, set()
+        self.seen_documents = {}
+        self.last_programs, self.programs_fresh = None, False
+        self.unmapped, self.suggestions = [], []
+        self._needs_recap_pending = False
+        self.agent = self._new_agent()
+        self._step("new_search", "Code (no model)", "Started a new search; your saved list is kept")
+        return {"session_id": self.session_id, "blocks": []}
 
     def _agent_turn(self, text: str) -> dict:
         self._drop_old_thinking()
@@ -557,10 +618,10 @@ class GuidedSession:
             cells = []
             for school in schools:
                 c = N.verify(school, copy.deepcopy(need))
-                shown = c["note"] or ", ".join(f"{e['field']}: {e['value']}" for e in c["evidence"][:1]) or ""
+                shown = c["note"] or N.plain_evidence(c["evidence"][:1])
                 cells.append({"status": c["status"], "text": shown})
             rows.append({"need": need["need"], "label": N.CATALOG[need["need"]]["label"], "cells": cells})
-        rows.append({"need": "data_quality", "label": "Data problems",
+        rows.append({"need": "data_quality", "label": "Problems in our data",
                      "cells": [{"status": N.ATTENTION if N.quality_flags(s) else N.CONFIRMED,
                                 "text": " ".join(f["note"] for f in N.quality_flags(s)) or "None found"}
                                for s in schools]})
@@ -588,7 +649,8 @@ class GuidedSession:
         current = {n["need"] for n in self.needs}
         if decision:  # gaps are kept across chip edits until the agent's next answer
             self.unmapped = [u for u in decision.unmapped if u.strip()][:5]
-            self.suggestions = [{"need": g.need, "label": g.label, "why": g.why} for g in decision.suggestions
+            self.suggestions = [{"need": g.need, "label": plain_label(g.label, N.CATALOG.get(g.need, {}).get("label")),
+                                 "why": g.why} for g in decision.suggestions
                                 if g.need in N.CATALOG and g.need not in current][:2]
         else:
             self.suggestions = [g for g in self.suggestions if g["need"] not in current]
@@ -599,7 +661,7 @@ class GuidedSession:
             if isinstance(value, dict):
                 value = {k: v for k, v in value.items() if not k.startswith("_")}
             chips.append({"need": n["need"], "mode": n["mode"], "value": value,
-                          "label": c.label if c else N.CATALOG[n["need"]]["label"],
+                          "label": plain_label(c.label, N.CATALOG[n["need"]]["label"]) if c else N.CATALOG[n["need"]]["label"],
                           "source": c.source if c else "stated"})
         if chips or self.unmapped or self.suggestions:
             blocks.append({"type": "criteria_chips", "chips": chips, "unmapped": self.unmapped,
@@ -607,14 +669,18 @@ class GuidedSession:
 
         if decision and decision.message and not self.comparison:  # a comparison carries it as its summary
             # Only entries lookup_content actually returned can be cited
-            sources = [{"id": s, "title": self.seen_content[s]} for s in decision.sources if s in self.seen_content]
+            # and each names the knowledge base document it came from, when it came from one
+            sources = [{"id": s, "title": self.seen_content[s],
+                        **({"document": self.seen_documents[s]} if s in self.seen_documents else {})}
+                       for s in decision.sources if s in self.seen_content]
             blocks.append({"type": "text", "markdown": decision.message, **({"sources": sources} if sources else {})})
 
         self.pending_question = None
         if decision and decision.question:
             q = decision.question
             self.pending_question = {"question_id": "q-" + uuid.uuid4().hex[:6], "text": q.text, "why": q.why,
-                                     "options": [o.model_dump() for o in q.options], "allow_text": True}
+                                     "options": [{"id": o.id, "label": plain_label(o.label)} for o in q.options],
+                                     "allow_text": True}
             blocks.append({"type": "clarifying_question", **self.pending_question})
 
         if self.comparison:
@@ -664,6 +730,18 @@ class GuidedSession:
 
 
 _NUMBER = re.compile(r"\d+(?:[.:,]\d+)*")
+
+# School-system terms parents often don't know (Vision doc: parents "don't know the jargon").
+JARGON = re.compile(r"\b(IEPs?|504s?|ELLs?|ESL|ESOL|ESAs?|SWD|FES(?:-EO|-UA)?|FTC|OSP|CTE|LEP)\b")
+_JARGON_ASIDE = re.compile(r"\s*[(\[][^)\]]*\b(?:IEPs?|504s?|ELLs?|ESL|ESOL|ESAs?|SWD|FES(?:-EO|-UA)?|FTC|OSP|CTE|LEP)\b[^)\]]*[)\]]")
+
+
+def plain_label(text: str, fallback: str | None = None) -> str:
+    """Short UI text without school-system terms: "Extra help for ADHD (IEP/504)" -> "Extra help for ADHD"."""
+    cleaned = _JARGON_ASIDE.sub("", text or "").strip()
+    if JARGON.search(cleaned) and fallback:
+        return fallback
+    return cleaned or (fallback or text)
 
 
 def _grounded(text: str, result: dict, programs: list[dict] | None = None) -> bool:

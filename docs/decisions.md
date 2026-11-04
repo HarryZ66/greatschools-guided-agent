@@ -182,6 +182,168 @@ check that didn't happen. It's a top-level field, not a block, so existing rende
 GreatSchools' core problem is that parents don't know what to ask. When a parent gives little
 beyond grade and location ("a good elementary school in Miami") and code found no trade-off,
 the agent still searches, then asks one question about what the child needs, offering the
-likeliest of learning support (IEP or 504), after-school care, a bus, counseling, strong
+likeliest of extra help with learning, after-school care, a bus, counseling, strong
 academics and small classes. If grade or location is missing it asks for that first and offers
 these as suggested chips. Eval cases `discovery_vague` (English) and `discovery_vague_es` check it.
+
+## 024: Plain words on every label, and feedback on replies
+
+Walking through the app as a parent of a 6th grader with ADHD showed jargon in the places parents
+read most: the chip "Extra help for ADHD (IEP/504)", answer options with "(IEP or 504)" (the prompt
+itself suggested that wording), a comparison cell showing `level_codes: ['e', 'm', 'p']`, and
+distances in kilometres. The Vision doc lists "don't know the jargon" as a core pain point.
+
+- The prompt has a plain-words section: labels, suggestions, questions and options use everyday words
+  ("extra help with learning", "help learning English"); a term appears in a message only if the
+  parent used or asked about it, explained in the same sentence. Distances in miles, ratings as
+  "4 out of 10".
+- Code backs it up: `plain_label` drops "(IEP/504)"-style asides from chips, suggestions and options,
+  and a chip that still uses a term falls back to the catalog's plain label. Catalog labels, notes
+  (including the extra-help rule, which now says what the data shows) and comparison cells
+  (`plain_evidence`) are written in plain words. Evidence field names don't change.
+- Thumbs moved from each school card to each agent reply ("Helpful?"). A thumbs-down on one school
+  out of eight told us little; a vote on the reply rates the whole answer, results and question
+  included. `/api/feedback` takes the reply's `turn` (new top-level field on every response) or a
+  `school_id` as before, so `relevance` in `/api/metrics` keeps working.
+
+## 025: Agent turns run on Amazon Bedrock AgentCore Runtime
+
+Until now the agent ran inside the API process on one Fargate task, with conversations in memory.
+That works for a demo but can't scale out: a second task wouldn't know the first one's
+conversations. AgentCore Runtime fixes this the way agents are meant to be hosted on AWS: each
+session gets its own isolated, warm environment, kept between turns, paid per use.
+
+- The same ARM64 image runs in both places. On AgentCore (`RUNNING_ON=agentcore`, port 8080) the
+  app also serves AgentCore's service contract: `GET /ping` and `POST /invocations`.
+- The Fargate API stays the public front door behind CloudFront and WAF. With `AGENT_RUNTIME_ARN`
+  set, it sends agent turns (`/api/turn`, `/api/turn/stream`) and the calls that need the
+  conversation's needs (`POST`/`DELETE /api/saved`, `/api/schools/{id}?session_id=…`) to
+  `InvokeAgentRuntime`, with the AgentCore session id `greatschools-guided-search-session-<session_id>`.
+  The API names new conversations so the first turn already has a session. Streamed turns pass
+  AgentCore's server-sent events through unchanged. Feedback, saved-list reads, school details
+  without a session, and metrics stay on the API: they need no conversation state.
+- Sessions stay warm for 30 idle minutes (8 hours at most); after that a parent's next turn starts
+  a new conversation, and saved schools still come back from DynamoDB.
+- The browser can't call AgentCore directly (it needs SigV4 or a JWT), which is why the API proxies.
+  The API and the frontend contract don't change.
+- "How I checked this" gains a first step, "Amazon Bedrock AgentCore Runtime", recorded by code on
+  the runtime, so a parent (and a judge) can see where the turn ran.
+- Without `AGENT_RUNTIME_ARN` (local runs, tests) everything runs in-process as before.
+
+## 026: OAuth on the agent runtime, and AgentCore Observability
+
+**Front door.** Anyone with IAM access to the account could call the runtime directly and skip the
+API's WAF rate limit. The runtime now has inbound auth through AgentCore Identity: a JWT authorizer
+that accepts only access tokens from our Cognito user pool, issued to the API's app client
+(`allowedClients`). Calls without a token, with a made-up token, or signed with IAM (SigV4) are
+rejected before they reach the container.
+
+- Machine to machine: the API gets tokens with the OAuth client-credentials grant (scope
+  `greatschools-agent/invoke`), caches each one until a minute before it expires, and calls the
+  runtime's HTTPS endpoint (`/runtimes/<arn>/invocations?qualifier=DEFAULT`) with it. Parents still
+  don't sign in; this guards the agent, not the app.
+- The client secret lives in Secrets Manager and reaches the task as an ECS secret, never as a plain
+  environment variable or a CDK output. The task role no longer needs `InvokeAgentRuntime`.
+- A rejected token is dropped so the next call fetches a new one; the parent sees "not reachable".
+- `agent/scripts/check_front_door.py` shows it: no token, a made-up token and a SigV4 call are
+  rejected; a Cognito token gets through.
+
+**Observability.** The runtime container runs under `opentelemetry-instrument` (AWS Distro for
+OpenTelemetry), so every turn's Strands agent spans, model calls and tool calls go to CloudWatch.
+CDK turns on CloudWatch Transaction Search (spans stored in CloudWatch Logs, 100% indexed, since a
+demo sends few) and delivers the runtime's own application logs and traces. The CloudWatch GenAI
+Observability dashboard shows sessions, traces, latency and token use per agent. Transaction
+Search is an account setting: deleting the stack turns it off again. Fargate runs without the
+instrumentation; it only passes calls through.
+
+## 027: The agent's data lookups are MCP tools behind an AgentCore Gateway
+
+The agent's stateless lookups (the parent guide, programs, finding a school by name, a school's
+record) are the kind of tools other agents could reuse, so they now sit behind an Amazon Bedrock
+AgentCore Gateway as MCP tools: `lookup_guide`, `search_programs`, `find_school_by_name` and
+`get_school`, served by one Lambda function (`gs_agent/gateway_tools.py`, image
+`agent/Dockerfile.tools`) built from the same code.
+
+- The model's tools don't change. `lookup_content`, `search_programs`, `find_school_by_name` and
+  `get_school_profile` keep their names, docstrings and session bookkeeping; only where their data
+  comes from changes. With `GATEWAY_URL` set (on AgentCore Runtime), each one calls the Gateway's
+  MCP tool through Strands' `MCPClient` over streamable HTTP; without it, the same function runs
+  in-process. Prompts and evals stay the same.
+- `find_schools` stays in the agent: it records the conversation's needs, checks and ranking, which
+  the Gateway's stateless tools shouldn't hold.
+- The Gateway uses IAM inbound auth. The runtime's role has `bedrock-agentcore:InvokeGateway` on
+  this Gateway only, and the MCP client signs every request with SigV4. The Gateway invokes the
+  Lambda with its own role; the Lambda can only read OpenSearch and call Titan embeddings.
+- "How I checked this" names the hop: "AgentCore Gateway (MCP) → AWS Lambda → Amazon OpenSearch".
+- A failed Gateway call is recorded in the trace and returned to the model as "the lookup failed",
+  never as made-up data.
+- `agent/scripts/gateway_tools_demo.py` lists the tools and calls `lookup_guide`.
+
+## 028: The parent guide is also an Amazon Bedrock Knowledge Base
+
+The parent guide (`data/content/guide.json`, 35 entries the team wrote) was only an OpenSearch
+index. It now also lives in an Amazon Bedrock Knowledge Base, so guide answers come from our own
+documents through a managed retrieval service, and each answer names the document it came from.
+
+- **Documents.** `GsKnowledgeStack` (`infra/stacks/knowledge_stack.py`) writes one markdown file
+  per entry (`guide/<id>.md`: title, aliases, body) with a `.metadata.json` sidecar (id, title,
+  kind, source) and uploads them with a CDK `BucketDeployment`. The files are built from
+  `guide.json` at synth time, so the guide stays the one source and a deploy reproduces them.
+  They go up as one folder asset: 70 separate inline sources made the deployment's response too
+  long for CloudFormation.
+- **Vector store: Amazon S3 Vectors.** It is the cheapest store a knowledge base can use: pay per
+  GB stored and per query, nothing while idle. OpenSearch Serverless would cost hundreds of
+  dollars a month for its minimum capacity. One index, Titan Text Embeddings v2, 1024 dimensions,
+  float32, cosine. Bedrock's own text and metadata fields are non-filterable, so they don't count
+  against S3 Vectors' small filterable-metadata limit.
+- **One chunk per entry** (chunking `NONE`): entries are a few sentences, so a hit is a whole entry.
+- **Ingestion.** A custom resource calls `StartIngestionJob` on every deploy that changes the
+  guide (its id is a hash of the entries). The job takes under a minute;
+  `agent/scripts/kb_demo.py` shows its status, and `--sync` runs one and waits.
+- **Connecting it.** With `KNOWLEDGE_BASE_ID` set, `search.lookup_content` calls the Bedrock Agent
+  Runtime `Retrieve` API (`gs_agent/knowledge.py`) instead of OpenSearch. Both paths use it: the
+  Gateway's Lambda on AgentCore and the in-process lookup locally. Code maps each hit back to the
+  entry through its metadata and keeps the S3 document name. It keeps OpenSearch's relevance rule:
+  a hit counts if its cosine similarity is at least 0.35 or its title or an alias is in the
+  question. Retrieve's score on this index is (1 + cosine) / 2; we checked that against Titan
+  embeddings computed directly. So an unrelated question still gets "no guide entry": "best pizza
+  near me" scores cosine 0.07 at best, and "What is a Waldorf school?" 0.26. Without
+  `KNOWLEDGE_BASE_ID` (tests, local runs) the guide stays on OpenSearch, unchanged. School profiles
+  still read guide terms from OpenSearch by id.
+- The 6 guide eval cases (P4) pass with the knowledge base turned on.
+- **Citing the document.** The model still only lists entry ids in `sources`; code keeps the ids
+  `lookup_content` returned and adds each one's `document` (for example `charter-school.md`) to
+  the `text` block. The trace step's service is "Amazon Bedrock Knowledge Base" (behind the
+  Gateway on AgentCore) and names the documents. The prompt doesn't change.
+- **Separate stack.** `GsKnowledgeStack` exports nothing and needs nothing from the other stacks,
+  so it deploys and `cdk destroy GsKnowledgeStack` removes it on its own. The app stack takes the
+  id as context (`cdk deploy GsAppStack -c knowledge_base_id=<id>`), which adds the env var and
+  `bedrock:Retrieve` on that knowledge base to the Gateway tools Lambda and the runtime role.
+- Retrieval on S3 Vectors is vector-only (no hybrid keyword search), so exact short terms like
+  "CTE" rely on the title and aliases being in each document's text.
+
+## 029: The saved list outlives a refresh and a new search
+
+The Vision doc ends the core journey with "save schools to a list", and login is out of scope
+("assume the user is signed in"). The session id stands in for the signed-in parent: the app keeps
+it in `localStorage` and loads `GET /api/saved` on start. A `new_search` event forgets the
+conversation (needs, results, chat history) but keeps the session id and its saves, so starting
+over never empties My list. Saves are in DynamoDB, so they also survive a server restart.
+
+## 030: ZIP codes from our data, "3 of 4 confirmed", and clock times
+
+- **ZIP codes.** The ZIP box is gone; parents say where they live in the one search box. When they
+  give only a ZIP, the agent stores it as `location.zip` and never guesses the city. Code finds the
+  area from our own schools (exact ZIP, then the same 4- and 3-digit area); a ZIP outside our data
+  gets "no schools there yet" with the areas we do cover. Eval cases `zip_only`, `zip_not_in_data`.
+- **"3 of 4 confirmed" instead of "% fit".** The percentage mixed verified checks with search
+  relevance, so a school whose data was plainly wrong (enrollment 1, 52 students per teacher)
+  showed "100% fit". The card now counts the confirmed checks listed under it, and turns amber with
+  "⚠ check data" when the school has data problems. Each problem also takes 0.02 off the score (at
+  most 3): enough that a clean school with the same checks ranks first, never enough to drop a
+  school below ones that meet fewer needs. The school stays visible, with the reason shown.
+- **Clock times.** Notes read "Care ends at 5:00 PM; you need 6:00 PM" and "Runs 5:00 PM–6:30 PM,
+  covers 5:00 PM–6:00 PM"; program cards show "Next: Tue, Nov 3 · 5:00 PM–6:30 PM". Evidence keeps
+  the raw "17:00", so grounding checks are unchanged.
+- **My list for returning parents.** The app stores the session id, starts a fresh conversation on
+  load with `new_search` (decision 029) and shows "My list (n)" on the home page.

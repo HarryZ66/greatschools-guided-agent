@@ -5,6 +5,7 @@ import aws_cdk as cdk
 
 from stacks.app_stack import AppStack
 from stacks.data_stack import DataStack
+from stacks.knowledge_stack import KnowledgeStack
 
 app = cdk.App()
 
@@ -14,7 +15,11 @@ env = cdk.Environment(
 )
 
 data = DataStack(app, "GsDataStack", env=env)
-AppStack(app, "GsAppStack", domain=data.domain, table=data.table, env=env)
+# The parent guide's Bedrock Knowledge Base (decision 028). Standalone: no cross-stack exports.
+KnowledgeStack(app, "GsKnowledgeStack", env=env)
+# With -c knowledge_base_id=<id> (the GsKnowledgeStack output), the guide lookup uses the knowledge base
+AppStack(app, "GsAppStack", domain=data.domain, table=data.table,
+         knowledge_base_id=app.node.try_get_context("knowledge_base_id"), env=env)
 
 cdk.Tags.of(app).add("project", "greatschools-guided-agent")
 
