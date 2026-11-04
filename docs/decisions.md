@@ -355,3 +355,16 @@ over never empties My list. Saves are in DynamoDB, so they also survive a server
   the raw "17:00", so grounding checks are unchanged.
 - **My list for returning parents.** The app stores the session id, starts a fresh conversation on
   load with `new_search` (decision 029) and shows "My list (n)" on the home page.
+
+## 031: If AgentCore Runtime is down, Fargate runs the turn
+
+Every agent turn, save and profile call goes through AgentCore Runtime (decision 025) behind OAuth
+(026). One failure there (a token, throttling, a cold start that times out) used to show the parent
+"Our assistant is not reachable" with no way forward. The Fargate API has the same code and the same
+permissions, so when the runtime can't be reached it now runs the call itself, and the trace's first
+step says so ("AgentCore Runtime didn't answer, so this turn ran on our Fargate service instead").
+After a failure it skips the runtime for 2 minutes, so later parents don't each wait for the same
+timeout. Errors the runtime returns on purpose (an unknown school, a bad request) still go to the
+parent. A turn that falls back starts a fresh conversation on Fargate; the saved list stays,
+because it lives in DynamoDB. A streamed turn falls back only if the runtime fails before sending
+anything; once progress has reached the parent, a failure is reported as an error.

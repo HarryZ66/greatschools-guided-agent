@@ -87,7 +87,7 @@
    "expect": {"program_include": ["After-School Robotics Club"], "program_exclude": ["Summer Robotics Camp"]}},
   {"id": "programs_past_only", "category": "programs",
    "turns": ["Robotics club for my 12 year old near Miami", "Is the summer robotics camp still open?"],
-   "expect": {"mention_any": ["past", "ended", "over", "already"], "program_exclude": ["Summer Robotics Camp"]}},
+   "expect": {"mention_any": ["past", "ended", "over", "already", "no upcoming"], "program_exclude": ["Summer Robotics Camp"]}},
   {"id": "programs_english", "category": "programs",
    "turns": ["English classes for my family in Hialeah"],
    "expect": {"program_include": ["Family English Conversation Night"]}},

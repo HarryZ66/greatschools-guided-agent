@@ -136,10 +136,43 @@ def _run_turn(session: GuidedSession, event: Event) -> dict:
     return response
 
 
+# If AgentCore Runtime can't be reached, the API runs the call itself (decision 031): this task has
+# the same code and permissions. After a failure it skips the runtime for a while, so parents
+# don't each wait for the same timeout; the conversation starts over, the saved list doesn't.
+RUNTIME_RETRY_AFTER_S = 120
+_runtime_down_until = 0.0
+FALLBACK_STEP = {"tool": "fallback", "service": "Amazon ECS on Fargate",
+                 "text": "AgentCore Runtime didn't answer, so this turn ran on our Fargate service instead"}
+
+
+def _use_runtime() -> bool:
+    return rc.enabled() and time.time() >= _runtime_down_until
+
+
+def _runtime_failed(op: str, session_id: str) -> None:
+    global _runtime_down_until
+    _runtime_down_until = time.time() + RUNTIME_RETRY_AFTER_S
+    log.warning("AgentCore Runtime unreachable (%s, session %s); running on Fargate for %ss",
+                op, session_id, RUNTIME_RETRY_AFTER_S)
+
+
+def _with_fallback_step(response: dict) -> dict:
+    if isinstance(response.get("trace"), dict):
+        response["trace"]["steps"].insert(0, dict(FALLBACK_STEP))
+    return response
+
+
 def _remote(op: str, session_id: str, body: dict) -> dict:
-    """Run one operation on the conversation's AgentCore Runtime session."""
+    """Run one operation on the conversation's AgentCore Runtime session.
+
+    Raises rc.RuntimeUnreachable when the runtime didn't answer, so the caller can run it locally;
+    errors the runtime returned on purpose (unknown school, bad request) go to the parent app.
+    """
     try:
         return rc.invoke(op, session_id, body)
+    except rc.RuntimeUnreachable:
+        _runtime_failed(op, session_id)
+        raise
     except rc.RuntimeCallError as e:
         raise HTTPException(status_code=e.status, detail=e.detail)
 
@@ -152,8 +185,12 @@ def _remote_turn_body(request: TurnRequest) -> tuple[str, dict]:
 
 @app.post("/api/turn")
 def turn(request: TurnRequest) -> dict:
-    if rc.enabled():
-        return _remote("turn", *_remote_turn_body(request))
+    if _use_runtime():
+        session_id, body = _remote_turn_body(request)
+        try:
+            return _remote("turn", session_id, body)
+        except rc.RuntimeUnreachable:
+            return _with_fallback_step(_run_turn(_session(session_id), request.event))
     return _run_turn(_session(request.session_id), request.event)
 
 
@@ -162,15 +199,22 @@ def turn_stream(request: TurnRequest) -> StreamingResponse:
     """Same as /api/turn, as server-sent events: `progress` events while the agent works
     (the "I checked this for you" trace), then one `result` event, or an `error` event.
     From Sanchit's PR #1."""
-    if rc.enabled():
-        return _remote_stream(*_remote_turn_body(request))
-    session = _session(request.session_id)
+    if _use_runtime():
+        return _remote_stream(request, *_remote_turn_body(request))
+    return StreamingResponse(_local_stream(_session(request.session_id), request.event),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _local_stream(session: GuidedSession, event: Event, fallback: bool = False):
+    """Server-sent events for a turn run in this process: progress, then the result or an error."""
     events: queue.Queue = queue.Queue()
 
     def work() -> None:
         session.on_progress = lambda text: events.put({"type": "progress", "text": text})
         try:
-            events.put({"type": "result", "response": _run_turn(session, request.event)})
+            response = _run_turn(session, event)
+            events.put({"type": "result", "response": _with_fallback_step(response) if fallback else response})
         except HTTPException as e:
             events.put({"type": "error", "status": e.status_code, "detail": e.detail})
         except Exception:
@@ -182,30 +226,38 @@ def turn_stream(request: TurnRequest) -> StreamingResponse:
             events.put(None)
 
     threading.Thread(target=work, daemon=True).start()
-
-    def stream():
-        while (item := events.get()) is not None:
-            yield _sse(item)
-
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    while (item := events.get()) is not None:
+        yield _sse(item)
 
 
 def _sse(item: dict) -> str:
     return f"event: {item['type']}\ndata: {json.dumps(item)}\n\n"
 
 
-def _remote_stream(session_id: str, body: dict) -> StreamingResponse:
-    """A streamed turn on AgentCore Runtime: its server-sent events pass through unchanged."""
+def _remote_stream(request: TurnRequest, session_id: str, body: dict) -> StreamingResponse:
+    """A streamed turn on AgentCore Runtime: its server-sent events pass through unchanged.
+
+    If the runtime fails before sending anything, the turn runs here instead (decision 031).
+    Once events have reached the parent, a failure is reported as an error event.
+    """
     def stream():
+        sent = False
         try:
-            yield from rc.invoke_stream(session_id, body)
-        except rc.RuntimeCallError as e:
-            yield _sse({"type": "error", "status": e.status, "detail": e.detail})
-        except Exception:
-            log.exception("streamed AgentCore turn failed for %s", session_id)
-            yield _sse({"type": "error", "status": 502,
-                        "detail": "Something went wrong on our side. Please try again, or start a new search."})
+            for chunk in rc.invoke_stream(session_id, body):
+                sent = True
+                yield chunk
+        except Exception as e:
+            if not sent:
+                if not isinstance(e, rc.RuntimeUnreachable):
+                    log.exception("streamed AgentCore turn failed for %s", session_id)
+                _runtime_failed("turn_stream", session_id)
+                yield from _local_stream(_session(session_id), request.event, fallback=True)
+            elif isinstance(e, rc.RuntimeCallError):
+                yield _sse({"type": "error", "status": e.status, "detail": e.detail})
+            else:
+                log.exception("streamed AgentCore turn failed for %s", session_id)
+                yield _sse({"type": "error", "status": 502,
+                            "detail": "Something went wrong on our side. Please try again, or start a new search."})
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -213,8 +265,11 @@ def _remote_stream(session_id: str, body: dict) -> StreamingResponse:
 
 @app.post("/api/saved")
 def save(request: SaveRequest) -> dict:
-    if rc.enabled():  # programs for this school depend on the conversation's needs
-        return _remote("save", request.session_id, {"request": request.model_dump()})
+    if _use_runtime():  # programs for this school depend on the conversation's needs
+        try:
+            return _remote("save", request.session_id, {"request": request.model_dump()})
+        except rc.RuntimeUnreachable:
+            pass  # save it here; DynamoDB holds the list either way
     school = search.get_school(request.school_id)
     if school is None:
         raise HTTPException(status_code=404, detail="Unknown school")
@@ -239,8 +294,11 @@ def list_saved(session_id: str) -> dict:
 
 @app.delete("/api/saved/{school_id}")
 def unsave(school_id: str, session_id: str) -> dict:
-    if rc.enabled():
-        return _remote("unsave", session_id, {"school_id": school_id, "session_id": session_id})
+    if _use_runtime():
+        try:
+            return _remote("unsave", session_id, {"school_id": school_id, "session_id": session_id})
+        except rc.RuntimeUnreachable:
+            pass
     store.unsave_school(session_id, school_id)
     if session_id in _sessions:
         _sessions[session_id].saved.discard(school_id)
@@ -261,8 +319,11 @@ def school_profile(school_id: str, session_id: str | None = None) -> dict:
 
     With a session_id, the profile checks that parent's needs, the same way the cards do.
     """
-    if session_id and rc.enabled():
-        return _remote("profile", session_id, {"school_id": school_id, "session_id": session_id})
+    if session_id and _use_runtime():
+        try:
+            return _remote("profile", session_id, {"school_id": school_id, "session_id": session_id})
+        except rc.RuntimeUnreachable:
+            pass
     school = search.get_school(school_id)
     if school is None:
         raise HTTPException(status_code=404, detail="Unknown school")

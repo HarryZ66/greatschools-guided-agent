@@ -112,10 +112,6 @@ t = time.time(); code, r = call("POST", "/api/saved", {"session_id": sid, "schoo
 check("POST /api/saved", code == 200 and any(s["school_id"] == target for s in r.get("saved", [])), "", t)
 t = time.time(); code, r = call("GET", f"/api/saved?session_id={sid}")
 check("GET /api/saved", code == 200 and len(r.get("saved", [])) == 1, str([s["name"] for s in r.get("saved", [])]), t)
-# New search keeps the session and its saved list (the app's "New search" button)
-code, rn, t = turn(sid, {"type": "new_search"})
-check("turn: new_search keeps saved list", code == 200 and rn.get("session_id") == sid and not rn.get("blocks")
-      and any(s["school_id"] == target for s in rn.get("saved", [])), f"{len(rn.get('saved', []))} kept", t)
 t = time.time(); code, r = call("DELETE", f"/api/saved/{target}?session_id={sid}")
 check("DELETE /api/saved/{id}", code == 200 and not r.get("saved"), "", t)
 
@@ -138,6 +134,14 @@ if tamarind:
 t = time.time(); code, r = call("GET", "/api/metrics")
 check("GET /api/metrics", code == 200 and r.get("searches", 0) > 0 and "saves_to_searches" in r,
       f"saves/searches {r.get('saves_to_searches')}, relevance {r.get('relevance')}, criteria/search {r.get('criteria_per_search')}", t)
+
+# New search keeps the session and its saved list (the app's "New search" button). Runs after the
+# profile and save checks, because it clears the conversation's needs they rely on.
+call("POST", "/api/saved", {"session_id": sid, "school_id": target})
+code, rn, t = turn(sid, {"type": "new_search"})
+check("turn: new_search keeps saved list", code == 200 and rn.get("session_id") == sid and not rn.get("blocks")
+      and any(s["school_id"] == target for s in rn.get("saved", [])), f"{len(rn.get('saved', []))} kept", t)
+call("DELETE", f"/api/saved/{target}?session_id={sid}")
 
 # Error paths: clear JSON errors, never a crash
 code, r = call("GET", "/api/schools/does-not-exist")
