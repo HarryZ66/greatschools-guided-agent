@@ -336,5 +336,63 @@
    "made-up data"
   ],
   "body": "This hackathon demo uses made-up schools, ratings and reviews in the same format as GreatSchools data. No real school or student data is used. The guide entries are short summaries written by our team; GreatSchools would review them before real use."
+ },
+ {
+  "id": "microschool",
+  "kind": "term",
+  "title": "Microschool",
+  "aliases": [
+   "micro school",
+   "micro-school",
+   "pod",
+   "learning pod"
+  ],
+  "body": "A very small school, often with a few dozen students or fewer in mixed-age groups. Microschools may meet in homes or community spaces and are usually private or part of homeschooling. Rules and oversight vary by state."
+ },
+ {
+  "id": "chronic-absence",
+  "kind": "term",
+  "title": "Attendance and chronic absence",
+  "aliases": [
+   "attendance",
+   "chronic absenteeism",
+   "absences",
+   "absent"
+  ],
+  "body": "Chronic absence usually means a student missed 10% or more of the school year, about 18 days. Schools with many chronically absent students may have problems worth asking about."
+ },
+ {
+  "id": "esa",
+  "kind": "term",
+  "title": "Education Savings Account (ESA)",
+  "aliases": [
+   "esa",
+   "education savings account",
+   "empowerment scholarship"
+  ],
+  "body": "A state program that puts public money into an account parents control. They can spend it on approved costs like private school tuition, tutoring, therapy or learning materials. Who qualifies and how much you get depend on your state."
+ },
+ {
+  "id": "voucher",
+  "kind": "term",
+  "title": "School voucher",
+  "aliases": [
+   "voucher",
+   "vouchers",
+   "opportunity scholarship"
+  ],
+  "body": "A state program that uses public money to pay some or all of a child's private school tuition. Rules about who qualifies depend on your state."
+ },
+ {
+  "id": "tax-credit-scholarship",
+  "kind": "term",
+  "title": "Tax-credit scholarship",
+  "aliases": [
+   "tax credit scholarship",
+   "tax credit",
+   "scholarship",
+   "scholarships"
+  ],
+  "body": "People or businesses donate to a nonprofit scholarship group and get a tax credit in return. The group gives scholarships that help families pay private school costs. A federal program starting in 2027 adds more of these; what's offered depends on your state."
  }
 ]

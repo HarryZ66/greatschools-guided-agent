@@ -3,15 +3,17 @@
     cd agent && PYTHONPATH=. uvicorn gs_agent.api:app --port 8000
 """
 
+import json
 import logging
 import os
+import queue
 import threading
 import time
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import search, store
@@ -48,6 +50,11 @@ def _session(session_id: str | None) -> GuidedSession:
     if session_id and session_id in _sessions:
         return _sessions[session_id]
     session = GuidedSession(session_id)
+    if session_id:  # a session we lost (e.g. after a restart): its saves are still in DynamoDB
+        try:
+            session.saved = {s["school_id"] for s in store.saved_schools(session_id)}
+        except Exception:
+            log.exception("could not load saved schools for %s", session_id)
     _sessions[session.session_id] = session
     _locks[session.session_id] = threading.Lock()
     return session
@@ -86,23 +93,60 @@ def health() -> dict:
     return {"ok": True, "sessions": len(_sessions)}
 
 
-@app.post("/api/turn")
-def turn(request: TurnRequest) -> dict:
-    session = _session(request.session_id)
+def _run_turn(session: GuidedSession, event: Event) -> dict:
     started = time.time()
     with _locks[session.session_id]:  # one turn at a time per conversation
         try:
-            response = session.handle(request.event.model_dump(exclude_none=True))
+            response = session.handle(event.model_dump(exclude_none=True))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-    if request.event.type in ("query", "answer", "chip_edit") and session.last:
+    # Count a search only when one ran this turn, so guide questions don't skew saves-to-searches.
+    searched = event.type == "chip_edit" or (event.type in ("query", "answer") and session.searched_this_turn)
+    if searched and session.last:
         try:
             store.record_search(session.session_id, len(session.needs), len(session.last["results"]))
         except Exception:
             log.exception("could not record search metric")
     response["elapsed_ms"] = int((time.time() - started) * 1000)
-    log.info("turn %s %s %dms", session.session_id, request.event.type, response["elapsed_ms"])
+    log.info("turn %s %s %dms", session.session_id, event.type, response["elapsed_ms"])
     return response
+
+
+@app.post("/api/turn")
+def turn(request: TurnRequest) -> dict:
+    return _run_turn(_session(request.session_id), request.event)
+
+
+@app.post("/api/turn/stream")
+def turn_stream(request: TurnRequest) -> StreamingResponse:
+    """Same as /api/turn, as server-sent events: `progress` events while the agent works
+    (the "I checked this for you" trace), then one `result` event, or an `error` event.
+    From Sanchit's PR #1."""
+    session = _session(request.session_id)
+    events: queue.Queue = queue.Queue()
+
+    def work() -> None:
+        session.on_progress = lambda text: events.put({"type": "progress", "text": text})
+        try:
+            events.put({"type": "result", "response": _run_turn(session, request.event)})
+        except HTTPException as e:
+            events.put({"type": "error", "status": e.status_code, "detail": e.detail})
+        except Exception:
+            log.exception("streamed turn failed for %s", session.session_id)
+            events.put({"type": "error", "status": 500,
+                        "detail": "Something went wrong on our side. Please try again, or start a new search."})
+        finally:
+            session.on_progress = None
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def stream():
+        while (item := events.get()) is not None:
+            yield f"event: {item['type']}\ndata: {json.dumps(item)}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/saved")

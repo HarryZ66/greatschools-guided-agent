@@ -92,6 +92,14 @@ Event types:
 
 Omit `session_id` on the first turn; every response returns the `session_id` to send next time.
 
+`POST /api/turn/stream` takes the same body and answers with server-sent events: zero or more
+`progress` events (`{"type": "progress", "text": "Checked 10 schools; ranking the top 8."}`), then
+one `result` event (`{"type": "result", "response": <the /api/turn response>}`) or one `error`
+event (`{"type": "error", "status": 400, "detail": "…"}`). Use it to show what the agent is doing.
+
+If the model fails, the response still has `"fallback": true` and blocks built by code: the cards
+from a search that ran this turn (never an earlier one) or the comparison table, plus a short note.
+
 Saving and feedback skip the agent entirely:
 
 - `POST /api/saved`: `{session_id, school_id}` → `{saved: [...]}`
@@ -133,6 +141,10 @@ type and renders them in order. The agent chooses which blocks to send.
 
 `source` is `stated`, `inferred` (the agent assumed it: show it editable and highlighted) or
 `answered` (from a clarifying question).
+
+`unmapped` lists wishes the parent stated that no need can check yet (e.g. "Robotics club at the
+school"); show them as greyed chips. `suggested` holds up to 2 needs the parent didn't mention,
+each `{need, label, why}`; show them as tap-to-add chips that send a `chip_edit` with mode `prefer`.
 
 ### `clarifying_question`
 
@@ -239,8 +251,9 @@ parent guide (P4); it lists only entries the `lookup_content` tool actually retu
 
 ## 5. Rules the backend enforces
 
-- Every `evidence` item must point to a field that `verify_criteria` actually returned.
-  Responses that cite anything else are rejected and retried once.
-- The response must match this schema; on a second failure the backend falls back to
-  `school_results` built directly from code.
-- At most about 6 tool calls per turn.
+- Evidence callouts are kept only for schools a tool returned this turn, only when that school has
+  non-confirmed evidence, and only if every number in the callout appears in that school's data
+  or in a program shown this turn. Guide sources are kept only if `lookup_content` returned them.
+- The response must match this schema; if the model fails, the backend answers with blocks built
+  from code (`"fallback": true`).
+- At most 6 tool calls per turn; a further call returns an error asking the model to answer.
