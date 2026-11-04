@@ -19,6 +19,8 @@
   .chips, .opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
   .chip { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-size: 13px; }
   .chip.require { border-color: var(--accent); }
+  .chip.unmapped { color: var(--muted); border-style: dashed; }
+  .chip.suggested { color: var(--accent); border-style: dashed; cursor: pointer; font: inherit; font-size: 13px; }
   .box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
   .callout { border-left: 3px solid var(--part); }
   .card h3 { margin: 0 0 2px; font-size: 16px; }
@@ -43,18 +45,34 @@ let sessionId = null;
 const out = document.getElementById("out"), status = document.getElementById("status");
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// Uses the streaming endpoint so progress ("Checked 9 schools…") shows while the agent works.
 async function send(event) {
   status.textContent = "Checking schools for you…";
   try {
-    const r = await fetch("/api/turn", { method: "POST", headers: { "content-type": "application/json" },
-                                         body: JSON.stringify({ session_id: sessionId, event }) });
-    const raw = await r.text();
-    let data;
-    try { data = JSON.parse(raw); } catch { throw new Error(`server returned ${r.status}: ${raw.slice(0, 120)}`); }
-    if (!r.ok) throw new Error(data.detail || r.status);
-    sessionId = data.session_id;
-    status.textContent = `Answered in ${(data.elapsed_ms / 1000).toFixed(1)}s`;
-    render(data.blocks);
+    const r = await fetch("/api/turn/stream", { method: "POST", headers: { "content-type": "application/json" },
+                                                body: JSON.stringify({ session_id: sessionId, event }) });
+    if (!r.ok || !r.body) throw new Error(`server returned ${r.status}: ${(await r.text()).slice(0, 120)}`);
+    const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      let cut;
+      while ((cut = buffer.indexOf("\n\n")) >= 0) {
+        const line = buffer.slice(0, cut).split("\n").find(l => l.startsWith("data: "));
+        buffer = buffer.slice(cut + 2);
+        if (!line) continue;
+        const msg = JSON.parse(line.slice(6));
+        if (msg.type === "progress") status.textContent = msg.text;
+        else if (msg.type === "error") throw new Error(msg.detail);
+        else if (msg.type === "result") {
+          sessionId = msg.response.session_id;
+          status.textContent = `Answered in ${(msg.response.elapsed_ms / 1000).toFixed(1)}s`;
+          render(msg.response.blocks);
+        }
+      }
+    }
   } catch (e) { status.textContent = "Error: " + e.message; }
 }
 
@@ -64,7 +82,10 @@ function render(blocks) {
     const el = document.createElement("div");
     if (b.type === "criteria_chips") {
       el.className = "chips";
-      el.innerHTML = b.chips.map(c => `<span class="chip ${c.mode}">${c.mode === "require" ? "Must: " : c.mode === "avoid" ? "Avoid: " : ""}${esc(c.label)}</span>`).join("");
+      el.innerHTML = b.chips.map(c => `<span class="chip ${c.mode}">${c.mode === "require" ? "Must: " : c.mode === "avoid" ? "Avoid: " : ""}${esc(c.label)}</span>`).join("")
+        + (b.unmapped || []).map(u => `<span class="chip unmapped" title="We can't check this yet">${esc(u)} (can't check)</span>`).join("")
+        + (b.suggested || []).map(s => `<button class="chip suggested" data-need="${esc(s.need)}" title="${esc(s.why)}">+ ${esc(s.label)}</button>`).join("");
+      el.querySelectorAll("button.suggested").forEach(btn => btn.onclick = () => send({ type: "chip_edit", need: btn.dataset.need, mode: "prefer" }));
     } else if (b.type === "text") {
       el.className = "box";
       el.innerHTML = esc(b.markdown) + (b.sources ? `<div class="meta" style="margin-top:6px">From the guide: ${b.sources.map(s => esc(s.title)).join(" · ")}</div>` : "");

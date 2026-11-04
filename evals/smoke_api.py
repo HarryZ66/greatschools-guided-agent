@@ -91,8 +91,23 @@ code, r6, t = turn(sid, {"type": "query", "text": "Is Lanternfish K-8 still runn
 text6 = " ".join(b["markdown"] for b in blocks(r6, "text"))
 check("turn: named school detail (P3)", code == 200 and "2024" in text6, text6[:90], t)
 
+# Streaming: progress events, then one result (through CloudFront when BASE is the deployment)
+t = time.time()
+req = urllib.request.Request(BASE + "/api/turn/stream", method="POST", headers={"content-type": "application/json"},
+                             data=json.dumps({"session_id": sid, "event": {"type": "query", "text": "What does IEP mean?"}}).encode())
+kinds, result = [], None
+with urllib.request.urlopen(req, timeout=120) as resp:
+    for raw in resp:
+        line = raw.decode().strip()
+        if line.startswith("data: "):
+            msg = json.loads(line[6:])
+            kinds.append(msg["type"])
+            result = msg.get("response", result)
+check("turn/stream: progress then result", "progress" in kinds and kinds[-1] == "result" and result and result.get("blocks"),
+      f"events: {' > '.join(kinds)}", t)
+
 # Saved list
-target = schools[0]["school_id"] if schools else "fl-000000"
+target =schools[0]["school_id"] if schools else "fl-000000"
 t = time.time(); code, r = call("POST", "/api/saved", {"session_id": sid, "school_id": target})
 check("POST /api/saved", code == 200 and any(s["school_id"] == target for s in r.get("saved", [])), "", t)
 t = time.time(); code, r = call("GET", f"/api/saved?session_id={sid}")

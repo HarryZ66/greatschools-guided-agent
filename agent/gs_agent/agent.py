@@ -7,8 +7,10 @@ code (needs.py, search.py). See docs/contract.md for the block format.
 
 import copy
 import json
+import logging
+import re
 import uuid
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import boto3
 from botocore.exceptions import ClientError
@@ -22,7 +24,10 @@ from . import programs as P
 from . import search
 from .config import MAIN_MODEL, REGION
 
+log = logging.getLogger("gs_agent.agent")
+
 Mode = Literal["require", "prefer", "avoid"]
+MAX_TOOL_CALLS = 6  # per turn (docs/contract.md, section 5)
 
 
 # ---------------------------------------------------------------- structured decision
@@ -52,8 +57,19 @@ class Callout(BaseModel):
     text: str = Field(description="'I checked this for you: ...' explaining one stale, missing or conflicting fact")
 
 
+class Suggestion(BaseModel):
+    need: str = Field(description="Catalog need id the parent did not mention")
+    label: str = Field(description="Short chip text, e.g. 'School bus'")
+    why: str = Field(description="One short reason tied to what the parent said, e.g. 'You work until 6pm'")
+
+
 class Decision(BaseModel):
     chips: list[ChipLabel] = Field(description="Every need you know so far, searched or not")
+    unmapped: list[str] = Field(default_factory=list, description=(
+        "Wishes the parent stated that no catalog need can check, in their own words (e.g. 'Montessori', "
+        "'near my church'). Empty if none."))
+    suggestions: list[Suggestion] = Field(default_factory=list, description=(
+        "0-2 needs the parent didn't mention but likely cares about, given what they said. Empty if none."))
     question: Question | None = Field(default=None, description="At most one question, or null")
     message: str = Field(description="1-3 plain sentences for the parent. No jargon. Don't restate the cards. "
                                      "If you ask a question, don't repeat it here.")
@@ -93,6 +109,11 @@ How you work:
    app's labels mean, call lookup_content and explain using only what it returns, in plain words,
    and list the entry ids in sources. If it returns nothing, say you don't have a guide entry for
    that yet and suggest asking the school or district; don't explain it from memory.
+8. Spot gaps. If the parent wants something the catalog can't check, put it in unmapped and say
+   plainly that we can't check it yet. Suggest at most 2 needs they didn't mention but probably care
+   about (a parent who works until 6pm may need a bus). Never search with a suggested need until
+   they add it.
+You have at most {max_tools} tool calls per turn.
 
 Honesty rules:
 - Never claim a school meets a need unless find_schools says confirmed. Never invent facts, numbers or quotes.
@@ -138,7 +159,27 @@ class GuidedSession:
         self.usage = {"inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0, "cacheWriteInputTokens": 0,
                       "model_calls": 0}
         self._usage_agent, self._usage_seen = None, {}
+        self.unmapped: list[str] = []
+        self.suggestions: list[dict] = []
+        self.on_progress: Callable[[str], None] | None = None  # set by the streaming endpoint
+        self._tool_calls = 0
+        self.searched_this_turn = False  # find_schools ran during the current turn
+        self._needs_recap_pending = False  # the conversation restarted after a failed turn
         self.agent = self._new_agent()
+
+    def progress(self, text: str) -> None:
+        if self.on_progress:
+            try:
+                self.on_progress(text)
+            except Exception:
+                log.exception("progress callback failed")
+
+    def _over_budget(self) -> str | None:
+        self._tool_calls += 1
+        if self._tool_calls > MAX_TOOL_CALLS:
+            return json.dumps({"error": f"Tool limit of {MAX_TOOL_CALLS} per turn reached. "
+                                        "Answer now with what you already have."})
+        return None
 
     def _new_agent(self, messages: list | None = None) -> Agent:
         return Agent(
@@ -147,7 +188,7 @@ class GuidedSession:
             model=BedrockModel(model_id=MAIN_MODEL, boto_session=boto3.Session(region_name=REGION),
                                max_tokens=4000, cache_config=CacheConfig(strategy="auto")),
             tools=self._tools(),
-            system_prompt=SYSTEM_PROMPT.format(catalog=_catalog_text()),
+            system_prompt=SYSTEM_PROMPT.format(catalog=_catalog_text(), max_tools=MAX_TOOL_CALLS),
             conversation_manager=SlidingWindowConversationManager(window_size=60),
             messages=messages,
             callback_handler=None,
@@ -165,12 +206,18 @@ class GuidedSession:
                 needs: All current needs, each {"need": <catalog id>, "mode": "require"|"prefer"|"avoid", "value": ...}.
                 semantic_query: Short description of softer wishes, in the parent's words.
             """
+            if (stop := session._over_budget()):
+                return stop
             clean = copy.deepcopy([n for n in needs if isinstance(n, dict) and n.get("need") in N.RULES])
             session.semantic_query = semantic_query or None
+            session.progress(f"Searching schools and checking {len(clean)} of your needs…")
             # find() adds the resolved location center to the needs; keep it for compare and edits
             session.last = search.find(clean, session.semantic_query)
             session.needs = clean
+            session.searched_this_turn = True
             session.seen_ids.update(r["school_id"] for r in session.last["results"])
+            session.progress(f"Checked {session.last['total_candidates']} schools; "
+                             f"ranking the top {len(session.last['results'])}.")
             return json.dumps(_compact(session.last))
 
         @tool
@@ -180,9 +227,12 @@ class GuidedSession:
             Args:
                 school_id: e.g. "fl-95390"
             """
+            if (stop := session._over_budget()):
+                return stop
             school = search.get_school(school_id)
             if school is None:
                 return json.dumps({"error": f"No school with id {school_id}"})
+            session.progress(f"Reading the profile for {school.get('name', school_id)}…")
             session.seen_ids.add(school_id)
             criteria =[N.verify(school, n) for n in copy.deepcopy(session.needs)]
             keep = {k: v for k, v in school.items() if k not in ("reviews_full", "reviews_text", "profile_text")}
@@ -195,6 +245,9 @@ class GuidedSession:
             Args:
                 name: The school name as the parent wrote it, e.g. "Lanternfish K-8".
             """
+            if (stop := session._over_budget()):
+                return stop
+            session.progress(f"Looking up '{name}'…")
             matches = search.find_by_name(name)
             session.seen_ids.update(m["school_id"] for m in matches)
             if not matches:
@@ -210,6 +263,9 @@ class GuidedSession:
             Args:
                 question: The parent's question, in their words.
             """
+            if (stop := session._over_budget()):
+                return stop
+            session.progress("Checking the parent guide…")
             entries = search.lookup_content(question)
             session.seen_content.update({e["id"]: e["title"] for e in entries})
             if not entries:
@@ -230,6 +286,9 @@ class GuidedSession:
                 time_from: Start of a time gap to cover, "HH:MM" 24h (e.g. care ends "17:00").
                 time_to: End of the gap, "HH:MM" (e.g. parent needs "18:00").
             """
+            if (stop := session._over_budget()):
+                return stop
+            session.progress(f"Looking for nearby programs: {interest}…")
             found = P.find_programs(interest, city, near_school_id, grades, time_from, time_to)
             session.last_programs, session.programs_fresh = found, True
             session.seen_programs.update(p["program_id"] for p in found["programs"])
@@ -267,20 +326,55 @@ class GuidedSession:
 
     def _agent_turn(self, text: str) -> dict:
         self._drop_old_thinking()
+        self._tool_calls, self.searched_this_turn = 0, False
+        if self._needs_recap_pending:
+            self._needs_recap_pending = False
+            if self.needs:
+                text = f"{self._recap()}\n\n{text}"
         try:
-            result = self.agent(text, structured_output_model=Decision)
-        except ClientError as e:
-            if e.response.get("Error", {}).get("Code") != "ValidationException":
-                raise
-            # Bedrock rejected the stored history. Start a fresh conversation that keeps
-            # what the parent has told us so far, and try once more.
-            recap = (f"(Context from earlier in this conversation: the parent's current needs are "
-                     f"{json.dumps(self._needs_for_prompt())}.)")
-            self.agent = self._new_agent()
-            result = self.agent(f"{recap}\n\n{text}", structured_output_model=Decision)
-        self._add_usage(result.metrics)
-        decision: Decision = result.structured_output
+            try:
+                result = self.agent(text, structured_output_model=Decision)
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") != "ValidationException":
+                    raise
+                # Bedrock rejected the stored history. Start a fresh conversation that keeps
+                # what the parent has told us so far, and try once more.
+                self.agent = self._new_agent()
+                self._tool_calls = 0
+                result = self.agent(f"{self._recap()}\n\n{text}", structured_output_model=Decision)
+            self._add_usage(result.metrics)
+            decision: Decision | None = result.structured_output
+            if decision is None:
+                raise ValueError("model returned no structured output")
+        except Exception:
+            log.exception("agent turn failed for session %s; answering from code", self.session_id)
+            return self._fallback()
         return self._blocks(decision)
+
+    def _recap(self) -> str:
+        return (f"(Context from earlier in this conversation: the parent's current needs are "
+                f"{json.dumps(self._needs_for_prompt())}.)")
+
+    def _fallback(self) -> dict:
+        """Contract section 5: when the model can't answer, show what code already knows.
+
+        Cards (or the comparison table) are built by code, so they're still right. Search
+        results are shown only if a search ran during this turn, so old results never pass
+        as the answer to a new question. The conversation restarts, since its history may
+        be broken; the next turn gets a recap of the parent's needs. (From Sanchit's PR #1.)
+        """
+        self.agent = self._new_agent()
+        self._needs_recap_pending = True
+        has_answer = bool(self.comparison) or (self.searched_this_turn and bool((self.last or {}).get("results")))
+        response = self._blocks(None, show_results=self.searched_this_turn)
+        note = ("I checked the data, but I couldn't write my explanation this time. "
+                "The checks shown come straight from the data." if has_answer
+                else "Sorry, I couldn't finish that. Please try again, or say it another way.")
+        blocks = response["blocks"]
+        at = 1 if blocks and blocks[0]["type"] == "criteria_chips" else 0
+        blocks.insert(at, {"type": "text", "markdown": note})
+        response["fallback"] = True
+        return response
 
     def _add_usage(self, metrics) -> None:
         """Strands' counters are running totals for the agent, so add only what this turn used."""
@@ -346,7 +440,7 @@ class GuidedSession:
 
     # ---------------------------------------------------------------- blocks
 
-    def _blocks(self, decision: Decision | None) -> dict:
+    def _blocks(self, decision: Decision | None, show_results: bool = True) -> dict:
         blocks: list[dict[str, Any]] = []
         self.chip_labels.update({c.need: c for c in (decision.chips if decision else [])})
         labels = self.chip_labels
@@ -355,6 +449,13 @@ class GuidedSession:
             # understood, and keep it so the next search starts from these needs.
             self.needs = [{"need": c.need, "mode": c.mode, "value": c.value}
                           for c in decision.chips if c.need in N.RULES]
+        current = {n["need"] for n in self.needs}
+        if decision:  # gaps are kept across chip edits until the agent's next answer
+            self.unmapped = [u for u in decision.unmapped if u.strip()][:5]
+            self.suggestions = [{"need": g.need, "label": g.label, "why": g.why} for g in decision.suggestions
+                                if g.need in N.CATALOG and g.need not in current][:2]
+        else:
+            self.suggestions = [g for g in self.suggestions if g["need"] not in current]
         chips = []
         for n in self.needs:
             c = labels.get(n["need"])
@@ -364,8 +465,9 @@ class GuidedSession:
             chips.append({"need": n["need"], "mode": n["mode"], "value": value,
                           "label": c.label if c else N.CATALOG[n["need"]]["label"],
                           "source": c.source if c else "stated"})
-        if chips:
-            blocks.append({"type": "criteria_chips", "chips": chips, "unmapped": []})
+        if chips or self.unmapped or self.suggestions:
+            blocks.append({"type": "criteria_chips", "chips": chips, "unmapped": self.unmapped,
+                           "suggested": self.suggestions})
 
         if decision and decision.message and not self.comparison:  # a comparison carries it as its summary
             # Only entries lookup_content actually returned can be cited
@@ -386,14 +488,18 @@ class GuidedSession:
             self.comparison = None
             return {"session_id": self.session_id, "blocks": blocks}
 
-        results = (self.last or {}).get("results", [])
+        results = (self.last or {}).get("results", []) if show_results else []
         by_id = {r["school_id"]: r for r in results}
+        programs = self.last_programs["programs"] if self.programs_fresh and self.last_programs else []
         for callout in (decision.callouts if decision else []):
             r = by_id.get(callout.school_id)
             if r is None:  # the model may only point at schools the tool returned
                 continue
             evidence = [e for c in r["criteria"] if c["status"] != N.CONFIRMED for e in c["evidence"]]
             evidence += [{"field": f["field"], "value": f["value"]} for f in r["quality_flags"]]
+            if not evidence or not _grounded(callout.text, r, programs):
+                log.info("dropped ungrounded callout for %s: %s", r["school_id"], callout.text)
+                continue
             blocks.append({"type": "evidence_callout", "school_id": r["school_id"], "text": callout.text,
                            "evidence": evidence})
 
@@ -409,6 +515,30 @@ class GuidedSession:
                  "saved": r["school_id"] in self.saved}
                 for r in results]})
         return {"session_id": self.session_id, "blocks": blocks}
+
+
+_NUMBER = re.compile(r"\d+(?:[.:,]\d+)*")
+
+
+def _grounded(text: str, result: dict, programs: list[dict] | None = None) -> bool:
+    """A callout may only use numbers (ratings, times, years, counts, distances) found in the data.
+
+    The facts are that school's criteria and flags, plus any programs shown this turn (a callout
+    may point at the library club that fills a gap). Cards come from code; this keeps the model's
+    own sentence from adding numbers the data doesn't contain. Based on Sanchit's PR #1.
+    """
+    facts = json.dumps({"criteria": result["criteria"], "flags": result["quality_flags"], "name": result["name"],
+                        "programs": programs or []})
+    known = set(_NUMBER.findall(facts))
+    known |= {d[:4] for d in re.findall(r"\d{4}-\d{2}", facts)}  # "2023" from "2023-05-01"
+    known |= {d[:7] for d in re.findall(r"\d{4}-\d{2}", facts)}
+    for n in list(known):
+        if re.fullmatch(r"\d+\.\d+", n):  # "1.6" km can be written "1.6" or rounded to "2"
+            known |= {n.split(".")[0], str(round(float(n)))}
+    for hh, mm in re.findall(r"\b(\d{1,2}):(\d{2})\b", facts):  # "18:30" can be written "6:30" or "6pm"
+        hour = str(int(hh) % 12 or 12)
+        known |= {hour, f"{hour}:{mm}"}
+    return all(n.replace(",", "") in known or n in known for n in _NUMBER.findall(text))
 
 
 def _compact(found: dict) -> dict:

@@ -86,6 +86,39 @@ prompt caching (Strands `CacheConfig(strategy="auto")`) serves about 83% of inpu
 cache, roughly halving the estimated cost per turn ($0.041 to $0.020) with no change in latency
 or eval results. At GreatSchools' scale this is the single biggest cost lever.
 
+## 013: Every need shapes the OpenSearch query (from Sanchit Arora's PR #1)
+
+Before, only grade, type and location reached OpenSearch, so for broad searches the 50 candidates
+were arbitrary. Now each need becomes filters or weighted boosts (`search.BOOSTS`), the way
+GreatSchools maps needs to query parameters today; require weighs 3x prefer, avoid lowers the
+score, and the parent's softer wishes add a k-NN clause. A required "high performing" filters to
+ratings 8-10 but keeps unrated schools so they show as missing. Statuses still come from
+`needs.verify()`; OpenSearch only decides which schools come back and breaks near-ties.
+
+## 014: Answer from code when the model fails (from PR #1)
+
+A failed model turn returns blocks built by code with `"fallback": true` instead of a 500: the
+cards from a search that ran this turn, or the comparison table, plus a short note. Results from
+an earlier turn are never reused as the answer to a new question. Each turn is capped at 6 tool
+calls, and callouts that use numbers not found in the data are dropped.
+
+## 015: Stream progress while the agent works (from PR #1)
+
+A turn takes 6-12 seconds. `POST /api/turn/stream` sends server-sent `progress` events
+("Checked 10 schools; ranking the top 8.") and then the result, so the parent sees the agent
+investigating instead of a spinner. It passes through CloudFront and the ALB unchanged.
+
+## 016: Show gaps the agent can't check, and needs the parent didn't mention (from PR #1)
+
+`criteria_chips` carries `unmapped` (wishes no need can check yet, such as a robotics club at
+the school) and up to 2 `suggested` needs (a parent who works until 6pm may need a bus). Being
+explicit about what we can't check is part of the honesty rule.
+
+PR #1's own glossary tool was not ported: the guide (decision 008) already answers term questions
+from OpenSearch with sources. Its five extra topics (microschools, chronic absence, ESAs, vouchers,
+tax-credit scholarships) were added to `data/content/guide.json`. PR #1 also proposed leaving
+programs out of scope; we kept them (decision 010) because the Vision doc lists program cards in scope.
+
 ## 004: Models
 
 - Main agent: Claude Sonnet 5.5 on Bedrock (`us.anthropic.claude-sonnet-5-5`)

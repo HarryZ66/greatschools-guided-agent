@@ -82,7 +82,7 @@ def test_blocks_drop_callouts_and_sources_the_tools_never_returned():
 
     session = GuidedSession("test")
     session.needs = [{"need": "grade_level", "mode": "require", "value": ["m"]}]
-    session.last = {"results": [{**result("real", "Real School", 1, N.CONFIRMED, N.CONFIRMED),
+    session.last = {"results": [{**result("real", "Real School", 1, N.CONFIRMED, N.PARTIAL, care_end="17:00"),
                                  "entity_type": "public", "city": "Miami", "score": 1.0,
                                  "watch_out": None, "quality_flags": []}]}
     session.seen_content = {"cte": "CTE"}

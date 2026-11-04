@@ -105,6 +105,7 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvi
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/turn` | Query, answer a question, compare two schools, or edit a chip (see `docs/contract.md`) |
+| `POST /api/turn/stream` | Same, as server-sent events: progress while the agent works, then the result |
 | `POST /api/saved`, `GET /api/saved?session_id=`, `DELETE /api/saved/{school_id}?session_id=` | Saved list |
 | `POST /api/feedback` | Thumbs up/down on a result |
 | `GET /api/schools/{school_id}` | Full school record for the profile view |
@@ -133,9 +134,9 @@ Latest run on Claude Sonnet 5.5 (full table in [`evals/results/latest.md`](evals
 | Guide answers citing a guide entry | 5 / 5 (and none for a term the guide lacks) |
 | Program cases (fill a gap, interest match, past-only excluded, nothing found) | 5 / 5 |
 | Errors | 0 |
-| Latency per turn | median 6.4 s, max 16.0 s |
-| Tokens per turn | ~10,900, 83% of input served from the prompt cache |
-| Estimated cost per turn | ~$0.020 with prompt caching, vs ~$0.041 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
+| Latency per turn | median 7.0 s, max 18.2 s |
+| Tokens per turn | ~11,900, 79% of input served from the prompt cache |
+| Estimated cost per turn | ~$0.023 with prompt caching, vs ~$0.045 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
 
 In 5 of 5 runs, the demo query found the library robotics club that covers Tamarind Cove's
 5–6pm care gap and asked the parent whether that works.
@@ -146,8 +147,8 @@ Load test against the deployed URL: 8 parents searching at the same moment all g
 Other tests:
 
 ```bash
-cd agent && ../.venv/bin/pytest -q tests                  # 24 unit tests of verify rules, hints, programs (no AWS needed)
-python3 evals/smoke_api.py https://<cloudfront-domain>    # 24 end-to-end API checks against a deployment
+cd agent && ../.venv/bin/pytest -q tests                  # 38 unit tests of verify rules, hints, programs, query building, fallback (no AWS needed)
+python3 evals/smoke_api.py https://<cloudfront-domain>    # 25 end-to-end API checks against a deployment, including streaming
 ```
 
 Before a demo, clear test traffic from `/api/metrics`:
