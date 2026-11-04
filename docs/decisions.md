@@ -255,3 +255,26 @@ demo sends few) and delivers the runtime's own application logs and traces. The 
 Observability dashboard shows sessions, traces, latency and token use per agent. Transaction
 Search is an account setting: deleting the stack turns it off again. Fargate runs without the
 instrumentation; it only passes calls through.
+
+## 027: The agent's data lookups are MCP tools behind an AgentCore Gateway
+
+The agent's stateless lookups (the parent guide, programs, finding a school by name, a school's
+record) are the kind of tools other agents could reuse, so they now sit behind an Amazon Bedrock
+AgentCore Gateway as MCP tools: `lookup_guide`, `search_programs`, `find_school_by_name` and
+`get_school`, served by one Lambda function (`gs_agent/gateway_tools.py`, image
+`agent/Dockerfile.tools`) built from the same code.
+
+- The model's tools don't change. `lookup_content`, `search_programs`, `find_school_by_name` and
+  `get_school_profile` keep their names, docstrings and session bookkeeping; only where their data
+  comes from changes. With `GATEWAY_URL` set (on AgentCore Runtime), each one calls the Gateway's
+  MCP tool through Strands' `MCPClient` over streamable HTTP; without it, the same function runs
+  in-process. Prompts and evals stay the same.
+- `find_schools` stays in the agent: it records the conversation's needs, checks and ranking, which
+  the Gateway's stateless tools shouldn't hold.
+- The Gateway uses IAM inbound auth. The runtime's role has `bedrock-agentcore:InvokeGateway` on
+  this Gateway only, and the MCP client signs every request with SigV4. The Gateway invokes the
+  Lambda with its own role; the Lambda can only read OpenSearch and call Titan embeddings.
+- "How I checked this" names the hop: "AgentCore Gateway (MCP) → AWS Lambda → Amazon OpenSearch".
+- A failed Gateway call is recorded in the trace and returned to the model as "the lookup failed",
+  never as made-up data.
+- `agent/scripts/gateway_tools_demo.py` lists the tools and calls `lookup_guide`.

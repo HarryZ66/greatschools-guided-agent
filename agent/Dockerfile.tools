@@ -1,0 +1,9 @@
+# MCP tools for the AgentCore Gateway (decision 027): the agent's data lookups as one Lambda function.
+FROM public.ecr.aws/lambda/python:3.13
+
+COPY requirements-tools.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-tools.txt
+
+COPY gs_agent ${LAMBDA_TASK_ROOT}/gs_agent
+
+CMD ["gs_agent.gateway_tools.handler"]

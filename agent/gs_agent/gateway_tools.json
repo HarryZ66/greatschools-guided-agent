@@ -1,0 +1,45 @@
+[
+  {
+    "name": "lookup_guide",
+    "description": "Search the GreatSchools parent guide: school terms (charter, magnet, IEP...), how ratings work, how school choice works. Returns entries with id, title, body and source.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {"question": {"type": "string", "description": "The parent's question, in their words"}},
+      "required": ["question"]
+    }
+  },
+  {
+    "name": "search_programs",
+    "description": "Find library and community programs (clubs, tutoring, after-school help) with upcoming sessions, near a city or near one school, optionally covering a time gap.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "interest": {"type": "string", "description": "What the parent wants, e.g. robotics club"},
+        "city": {"type": "string", "description": "City to search around"},
+        "near_school_id": {"type": "string", "description": "A school_id to search within about 5 miles of"},
+        "grades": {"type": "array", "items": {"type": "string"}, "description": "Level codes, e.g. [\"m\"]"},
+        "time_from": {"type": "string", "description": "Start of a time gap, HH:MM 24h"},
+        "time_to": {"type": "string", "description": "End of a time gap, HH:MM 24h"}
+      },
+      "required": ["interest"]
+    }
+  },
+  {
+    "name": "find_school_by_name",
+    "description": "Look up schools by name. Returns matching school ids, names and cities.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {"name": {"type": "string", "description": "The school name as the parent wrote it"}},
+      "required": ["name"]
+    }
+  },
+  {
+    "name": "get_school",
+    "description": "The full data record for one school, by school_id.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {"school_id": {"type": "string", "description": "e.g. fl-95390"}},
+      "required": ["school_id"]
+    }
+  }
+]

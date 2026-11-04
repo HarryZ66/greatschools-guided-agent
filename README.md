@@ -49,6 +49,7 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | AWS WAF | Rate limit on agent turns and IP reputation blocking at CloudFront |
 | Amazon Cognito + AgentCore Identity | OAuth front door on the agent runtime: only the API's access tokens get in (decision 026) |
 | AWS Secrets Manager | The API's OAuth client secret |
+| Amazon Bedrock AgentCore Gateway + AWS Lambda | The agent's data lookups as 4 MCP tools (guide, programs, school by name, school record), IAM-protected (decision 027) |
 | Amazon CloudWatch | Container logs (14 days), WAF metrics, and AgentCore Observability: agent traces, spans and logs through Transaction Search |
 
 All resources are in `us-east-1`.
@@ -173,6 +174,7 @@ Other tests:
 cd agent && ../.venv/bin/pytest -q tests                  # 60 unit tests of verify rules, hints, programs, query building, fallback, cost, profile, trace (no AWS needed)
 python3 evals/smoke_api.py https://<cloudfront-domain>    # 26 end-to-end API checks against a deployment, including streaming
 python3 agent/scripts/check_front_door.py                # the agent runtime rejects calls without an OAuth token
+python3 agent/scripts/gateway_tools_demo.py              # lists the Gateway's MCP tools and calls one
 ```
 
 Before a demo, clear test traffic from `/api/metrics`:
