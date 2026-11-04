@@ -18,21 +18,21 @@ CATALOG: dict[str, dict[str, str]] = {
     "grade_level": {"label": "Grade level", "value": 'list of level codes: "p" pre-K, "e" elementary (K-5), "m" middle (6-8), "h" high (9-12)'},
     "location": {"label": "Location", "value": '{"city": "Miami", "state": "FL", "radius_km": 20}'},
     "school_type": {"label": "School type", "value": 'list of "public", "charter", "private"'},
-    "high_performing": {"label": "High ratings", "value": "none"},
-    "stem": {"label": "STEM", "value": "none"},
+    "high_performing": {"label": "Highly rated", "value": "none"},
+    "stem": {"label": "STEM (science, tech, math)", "value": "none"},
     "after_school_care": {"label": "After-school care", "value": 'latest pickup time needed, "HH:MM" 24h, or null'},
     "transportation": {"label": "School bus", "value": "none"},
     "small_classes": {"label": "Small classes", "value": "none"},
-    "gifted": {"label": "Gifted program", "value": "none"},
-    "special_ed": {"label": "Special ed / IEP support", "value": "none"},
-    "ell_support": {"label": "English learner support", "value": "none"},
+    "gifted": {"label": "Program for advanced learners", "value": "none"},
+    "special_ed": {"label": "Extra help with learning", "value": "none"},
+    "ell_support": {"label": "Help learning English", "value": "none"},
     "safety": {"label": "Safe, low bullying", "value": "none. Means the parent wants a safe school; use require or prefer, never avoid"},
     "attendance": {"label": "Good attendance", "value": "none"},
-    "mental_health": {"label": "Counseling and mental health support", "value": "none"},
+    "mental_health": {"label": "Counseling support", "value": "none"},
     "arts": {"label": "Arts", "value": "none"},
     "sports": {"label": "Sports", "value": "none"},
     "college_prep": {"label": "College prep", "value": "none"},
-    "cost": {"label": "Tuition-free / affordable", "value": "max yearly tuition in USD, or null for free only"},
+    "cost": {"label": "Free or low cost", "value": "max yearly tuition in USD, or null for free only"},
 }
 
 LEVEL_NAMES = {"p": "pre-K", "e": "elementary", "m": "middle", "h": "high"}
@@ -108,19 +108,66 @@ def haversine_km(a: dict, b: dict) -> float:
     return 6371 * 2 * math.asin(math.sqrt(h))
 
 
+FIELD_WORDS = {
+    "level_codes": "Grades", "entity_type": "School type", "summary_rating": "GreatSchools rating",
+    "avg_review_rating": "Parent rating", "class_size.tier": "Class size", "student_teacher_ratio": "Students per teacher",
+    "after_care_end_time": "Care ends", "osp.transportation": "Transportation", "gifted_talented": "Advanced program",
+    "swd_test_scores_rating": "Test results for students who get extra help", "ell.tier": "Results for students learning English",
+    "high_attendance.tier": "Attendance", "attendance_rate": "Attendance rate", "tuition": "Tuition",
+    "distance_miles": "Distance", "college_readiness_rating": "College readiness rating",
+}
+
+
+def plain_evidence(evidence: list[dict]) -> str:
+    """One evidence item as a short phrase for parents, e.g. "Class size: small" (no raw field names)."""
+    parts = []
+    for e in evidence:
+        field, value = e.get("field", ""), e.get("value")
+        if field == "level_codes":
+            value = grades_text(value)
+        elif field in ("summary_rating", "swd_test_scores_rating", "college_readiness_rating"):
+            value = f"{value} out of 10"
+        elif field == "avg_review_rating":
+            value = f"{value} out of 5"
+        elif field == "tuition":
+            value = f"${value:,}/year" if isinstance(value, (int, float)) else value
+        elif field == "distance_miles":
+            value = f"{value} miles"
+        elif isinstance(value, bool):
+            value = "yes" if value else "no"
+        elif isinstance(value, list):
+            value = ", ".join(str(v).replace("_", " ") for v in value)
+        elif isinstance(value, str):
+            value = value.replace("_", " ")
+        label = FIELD_WORDS.get(field, field.split(":")[0].split(".")[-1].replace("_", " ").capitalize())
+        parts.append(f"{label}: {value}")
+    return "; ".join(parts)
+
+
+def km_to_miles(km: float) -> float:
+    """Parents in the US think in miles; distances are computed in km and shown in miles."""
+    return round(km * 0.621371, 1)
+
+
+def grades_text(codes) -> str:
+    names = [LEVEL_NAMES[c] for c in ("p", "e", "m", "h") if c in set(codes or [])]
+    return " and ".join([", ".join(names[:-1]), names[-1]] if len(names) > 1 else names) or "unknown grades"
+
+
 # ---------------------------------------------------------------- per-need rules
 
 def v_grade_level(school: dict, value: Any) -> dict:
     wanted = set(value or [])
     have = set(school.get("level_codes", []))
     ev = [_ev("level_codes", sorted(have))]
+    serves = f"Serves {grades_text(have)} grades."
     if not wanted:
         return _result("grade_level", MISSING, ev, "Grade level not specified.")
     if wanted <= have:
-        return _result("grade_level", CONFIRMED, ev)
+        return _result("grade_level", CONFIRMED, ev, serves)
     if wanted & have:
-        return _result("grade_level", PARTIAL, ev, "Covers only some of the grades asked for.")
-    return _result("grade_level", ATTENTION, ev, "Doesn't serve these grades.")
+        return _result("grade_level", PARTIAL, ev, f"{serves} That's only some of the grades you asked for.")
+    return _result("grade_level", ATTENTION, ev, f"{serves} Not the grades you asked for.")
 
 
 def v_location(school: dict, value: Any) -> dict:
@@ -129,12 +176,12 @@ def v_location(school: dict, value: Any) -> dict:
     center = value.get("_center")
     if center and school.get("location"):
         km = round(haversine_km(center, school["location"]), 1)
-        ev.append(_ev("distance_km", km))
+        ev += [_ev("distance_km", km), _ev("distance_miles", km_to_miles(km))]
         if school.get("city", "").lower() == str(value.get("city", "")).lower():
             return _result("location", CONFIRMED, ev)
         radius = value.get("radius_km", 20)
         status = CONFIRMED if km <= radius else PARTIAL
-        return _result("location", status, ev, f"About {km} km from {value.get('city')}.")
+        return _result("location", status, ev, f"About {km_to_miles(km)} miles from {value.get('city')}.")
     if school.get("city", "").lower() == str(value.get("city", "")).lower():
         return _result("location", CONFIRMED, ev)
     return _result("location", PARTIAL, ev, "Outside the requested city.")
@@ -238,12 +285,20 @@ def v_special_ed(school: dict, value: Any) -> dict:
     if topic["recent_pos"] or topic["recent_neg"]:
         ev.append(_ev("reviews: Special Ed / IEP", f"{topic['recent_pos']} positive, {topic['recent_neg']} negative (recent)"))
     if rating is None and not ev:
-        return _result("special_ed", MISSING, [], "No special education data or recent reviews.")
+        return _result("special_ed", MISSING, [], "No information on extra help for learning. Ask the school.")
+    # Plain words for parents: what the data says, without "IEP" or "SWD".
+    facts = []
+    if rating is not None:
+        facts.append(f"test results for students who get extra help: {rating} out of 10")
+    if topic["recent_pos"] or topic["recent_neg"]:
+        facts.append(f"recent parent reviews about it: {topic['recent_pos']} good, {topic['recent_neg']} bad")
+    joined = "; ".join(facts)
+    note = joined[0].upper() + joined[1:] + "."
     if (rating or 0) >= 7 and topic["recent_neg"] <= topic["recent_pos"]:
-        return _result("special_ed", CONFIRMED, ev)
+        return _result("special_ed", CONFIRMED, ev, note)
     if rating is not None and rating <= 3 or topic["recent_neg"] > topic["recent_pos"]:
-        return _result("special_ed", ATTENTION, ev)
-    return _result("special_ed", PARTIAL, ev)
+        return _result("special_ed", ATTENTION, ev, note)
+    return _result("special_ed", PARTIAL, ev, f"{note} Some good signs; ask the school what help they give.")
 
 
 def v_ell_support(school: dict, value: Any) -> dict:

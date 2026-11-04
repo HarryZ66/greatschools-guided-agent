@@ -122,7 +122,7 @@ def for_saved_school(school_id: str, school: dict, needs: list[dict], size: int 
             else:
                 gap = f"{school['name']} {GAP_WORDING.get(check['status'], 'may not offer')} {label}."
             why = (f"{gap} {p['name']} at {p['organization']} runs {_clock(session['start'])}–{_clock(session['end'])} "
-                   f"on {', '.join(p['meets_on'])}, {p['distance_km']} km away ({p['cost'].lower()}).")
+                   f"on {', '.join(p['meets_on'])}, {p.get('distance_miles') or N.km_to_miles(p['distance_km'])} miles away ({p['cost'].lower()}).")
             picks.append({**p, "fills_need": need["need"], "why": why})
             break  # one program per gap
     picks.sort(key=lambda p: (p["cost"] != "Free", p["distance_km"], p["next_sessions"][0]["date"]))
@@ -179,6 +179,7 @@ def find_programs(interest: str = "", city: str = "", near_school_id: str = "", 
         programs.append({
             "program_id": h["_id"], "name": p["name"], "organization": org.get("name"), "city": p.get("city"),
             "distance_km": round(N.haversine_km(center, p["location"]), 1),
+            "distance_miles": N.km_to_miles(N.haversine_km(center, p["location"])),
             "near": anchor, "meets_on": _weekdays(p), "next_sessions": sessions, "ages": p.get("age_display"),
             "cost": p.get("cost_display") or "Not listed", "registration_open": p.get("has_available_registration"),
             "tags": p.get("tag_names", []), "description": p.get("description", "")[:300],

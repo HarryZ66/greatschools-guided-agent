@@ -1,7 +1,7 @@
 """DynamoDB persistence for saved schools, feedback and the metrics GreatSchools tracks.
 
 Single table (see infra/stacks/data_stack.py):
-    pk = SESSION#<id>   sk = SAVED#<school_id> | FEEDBACK#<school_id> | SEARCH#<iso time>
+    pk = SESSION#<id>   sk = SAVED#<school_id> | FEEDBACK#TURN#<n> or FEEDBACK#<school_id> | SEARCH#<iso time>
 """
 
 import json
@@ -50,10 +50,11 @@ def saved_schools(session_id: str) -> list[dict]:
     return [{"school_id": i["school_id"], "name": i.get("name"), "at": i["at"]} for i in items["Items"]]
 
 
-def record_feedback(session_id: str, school_id: str, vote: str) -> None:
-    # One vote per school per session; a new vote replaces the old one.
-    _table().put_item(Item={"pk": _pk(session_id), "sk": f"FEEDBACK#{school_id}", "school_id": school_id,
-                            "vote": vote, "at": _now()})
+def record_feedback(session_id: str, vote: str, school_id: str | None = None, turn: int | None = None) -> None:
+    """One vote per reply (or per school) per session; a new vote replaces the old one."""
+    target = {"turn": turn} if turn is not None else {"school_id": school_id}
+    key = f"TURN#{turn}" if turn is not None else school_id
+    _table().put_item(Item={"pk": _pk(session_id), "sk": f"FEEDBACK#{key}", **target, "vote": vote, "at": _now()})
 
 
 def record_search(session_id: str, criteria_count: int, result_count: int) -> None:

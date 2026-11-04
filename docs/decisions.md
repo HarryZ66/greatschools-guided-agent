@@ -182,6 +182,26 @@ check that didn't happen. It's a top-level field, not a block, so existing rende
 GreatSchools' core problem is that parents don't know what to ask. When a parent gives little
 beyond grade and location ("a good elementary school in Miami") and code found no trade-off,
 the agent still searches, then asks one question about what the child needs, offering the
-likeliest of learning support (IEP or 504), after-school care, a bus, counseling, strong
+likeliest of extra help with learning, after-school care, a bus, counseling, strong
 academics and small classes. If grade or location is missing it asks for that first and offers
 these as suggested chips. Eval cases `discovery_vague` (English) and `discovery_vague_es` check it.
+
+## 024: Plain words on every label, and feedback on replies
+
+Walking through the app as a parent of a 6th grader with ADHD showed jargon in the places parents
+read most: the chip "Extra help for ADHD (IEP/504)", answer options with "(IEP or 504)" (the prompt
+itself suggested that wording), a comparison cell showing `level_codes: ['e', 'm', 'p']`, and
+distances in kilometres. The Vision doc lists "don't know the jargon" as a core pain point.
+
+- The prompt has a plain-words section: labels, suggestions, questions and options use everyday words
+  ("extra help with learning", "help learning English"); a term appears in a message only if the
+  parent used or asked about it, explained in the same sentence. Distances in miles, ratings as
+  "4 out of 10".
+- Code backs it up: `plain_label` drops "(IEP/504)"-style asides from chips, suggestions and options,
+  and a chip that still uses a term falls back to the catalog's plain label. Catalog labels, notes
+  (including the extra-help rule, which now says what the data shows) and comparison cells
+  (`plain_evidence`) are written in plain words. Evidence field names don't change.
+- Thumbs moved from each school card to each agent reply ("Helpful?"). A thumbs-down on one school
+  out of eight told us little; a vote on the reply rates the whole answer, results and question
+  included. `/api/feedback` takes the reply's `turn` (new top-level field on every response) or a
+  `school_id` as before, so `relevance` in `/api/metrics` keeps working.

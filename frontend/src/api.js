@@ -50,5 +50,10 @@ export const saveSchool = (sessionId, schoolId) =>
 export const unsaveSchool = (sessionId, schoolId) =>
   json(`/api/saved/${encodeURIComponent(schoolId)}?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
 
-export const sendFeedback = (sessionId, schoolId, vote) =>
-  json('/api/feedback', { method: 'POST', body: JSON.stringify({ session_id: sessionId, school_id: schoolId, vote }) })
+// Thumbs on one agent reply: `turn` is the number the /api/turn response carried.
+export const rateReply = (sessionId, turn, vote) =>
+  json('/api/feedback', { method: 'POST', body: JSON.stringify({ session_id: sessionId, turn, vote }) })
+
+// The school record plus a verified `profile` for this session's needs (P3; no model call).
+export const getSchool = (sessionId, schoolId) =>
+  json(`/api/schools/${encodeURIComponent(schoolId)}${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`)
