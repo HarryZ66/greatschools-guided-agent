@@ -278,3 +278,46 @@ AgentCore Gateway as MCP tools: `lookup_guide`, `search_programs`, `find_school_
 - A failed Gateway call is recorded in the trace and returned to the model as "the lookup failed",
   never as made-up data.
 - `agent/scripts/gateway_tools_demo.py` lists the tools and calls `lookup_guide`.
+
+## 028: The parent guide is also an Amazon Bedrock Knowledge Base
+
+The parent guide (`data/content/guide.json`, 35 entries the team wrote) was only an OpenSearch
+index. It now also lives in an Amazon Bedrock Knowledge Base, so guide answers come from our own
+documents through a managed retrieval service, and each answer names the document it came from.
+
+- **Documents.** `GsKnowledgeStack` (`infra/stacks/knowledge_stack.py`) writes one markdown file
+  per entry (`guide/<id>.md`: title, aliases, body) with a `.metadata.json` sidecar (id, title,
+  kind, source) and uploads them with a CDK `BucketDeployment`. The files are built from
+  `guide.json` at synth time, so the guide stays the one source and a deploy reproduces them.
+  They go up as one folder asset: 70 separate inline sources made the deployment's response too
+  long for CloudFormation.
+- **Vector store: Amazon S3 Vectors.** It is the cheapest store a knowledge base can use: pay per
+  GB stored and per query, nothing while idle. OpenSearch Serverless would cost hundreds of
+  dollars a month for its minimum capacity. One index, Titan Text Embeddings v2, 1024 dimensions,
+  float32, cosine. Bedrock's own text and metadata fields are non-filterable, so they don't count
+  against S3 Vectors' small filterable-metadata limit.
+- **One chunk per entry** (chunking `NONE`): entries are a few sentences, so a hit is a whole entry.
+- **Ingestion.** A custom resource calls `StartIngestionJob` on every deploy that changes the
+  guide (its id is a hash of the entries). The job takes under a minute;
+  `agent/scripts/kb_demo.py` shows its status, and `--sync` runs one and waits.
+- **Connecting it.** With `KNOWLEDGE_BASE_ID` set, `search.lookup_content` calls the Bedrock Agent
+  Runtime `Retrieve` API (`gs_agent/knowledge.py`) instead of OpenSearch. Both paths use it: the
+  Gateway's Lambda on AgentCore and the in-process lookup locally. Code maps each hit back to the
+  entry through its metadata and keeps the S3 document name. It keeps OpenSearch's relevance rule:
+  a hit counts if its cosine similarity is at least 0.35 or its title or an alias is in the
+  question. Retrieve's score on this index is (1 + cosine) / 2; we checked that against Titan
+  embeddings computed directly. So an unrelated question still gets "no guide entry": "best pizza
+  near me" scores cosine 0.07 at best, and "What is a Waldorf school?" 0.26. Without
+  `KNOWLEDGE_BASE_ID` (tests, local runs) the guide stays on OpenSearch, unchanged. School profiles
+  still read guide terms from OpenSearch by id.
+- The 6 guide eval cases (P4) pass with the knowledge base turned on.
+- **Citing the document.** The model still only lists entry ids in `sources`; code keeps the ids
+  `lookup_content` returned and adds each one's `document` (for example `charter-school.md`) to
+  the `text` block. The trace step's service is "Amazon Bedrock Knowledge Base" (behind the
+  Gateway on AgentCore) and names the documents. The prompt doesn't change.
+- **Separate stack.** `GsKnowledgeStack` exports nothing and needs nothing from the other stacks,
+  so it deploys and `cdk destroy GsKnowledgeStack` removes it on its own. The app stack takes the
+  id as context (`cdk deploy GsAppStack -c knowledge_base_id=<id>`), which adds the env var and
+  `bedrock:Retrieve` on that knowledge base to the Gateway tools Lambda and the runtime role.
+- Retrieval on S3 Vectors is vector-only (no hybrid keyword search), so exact short terms like
+  "CTE" rely on the title and aliases being in each document's text.

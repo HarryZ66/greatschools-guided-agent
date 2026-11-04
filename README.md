@@ -50,6 +50,7 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | Amazon Cognito + AgentCore Identity | OAuth front door on the agent runtime: only the API's access tokens get in (decision 026) |
 | AWS Secrets Manager | The API's OAuth client secret |
 | Amazon Bedrock AgentCore Gateway + AWS Lambda | The agent's data lookups as 4 MCP tools (guide, programs, school by name, school record), IAM-protected (decision 027) |
+| Amazon Bedrock Knowledge Bases + Amazon S3 Vectors | The parent guide as one S3 document per entry; guide answers cite the document they came from (decision 028) |
 | Amazon CloudWatch | Container logs (14 days), WAF metrics, and AgentCore Observability: agent traces, spans and logs through Transaction Search |
 
 All resources are in `us-east-1`.
@@ -114,6 +115,17 @@ GreatSchools would review them before real use.
 
 ```bash
 cd data && AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python ingest_content.py content/guide.json --recreate
+```
+
+The same guide also goes into an Amazon Bedrock Knowledge Base (decision 028). `cdk deploy
+GsKnowledgeStack` uploads one markdown file per entry (with a `.metadata.json` sidecar) to S3,
+creates the knowledge base on S3 Vectors and starts an ingestion job. Turn it on for the agent with
+`cdk deploy GsAppStack -c knowledge_base_id=<GsKnowledgeStack.KnowledgeBaseId>`, or locally with
+`KNOWLEDGE_BASE_ID=<id>`. Check it with one live Retrieve (`--sync` re-ingests first):
+
+```bash
+(cd infra && cdk deploy GsKnowledgeStack --outputs-file cdk-outputs-knowledge.json)
+AWS_PROFILE=<profile> AWS_REGION=us-east-1 .venv/bin/python agent/scripts/kb_demo.py "What is a charter school?"
 ```
 
 ## Run the agent API locally

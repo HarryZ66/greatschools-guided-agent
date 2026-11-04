@@ -244,7 +244,7 @@ function Message({ m, live, onOption, onVote, onOpenComparison, busy }) {
     <div className={'turn ' + m.r}>
       <div className={'m ' + m.r + (m.error ? ' err' : '')}>
         {m.t}
-        {m.sources?.length > 0 && <small className="src">From the GreatSchools guide: {m.sources.map(s => s.title).join(' · ')}</small>}
+        {m.sources?.length > 0 && <small className="src">From the GreatSchools guide: {m.sources.map(s => s.document ? `${s.title} (${s.document})` : s.title).join(' · ')}</small>}
         {m.callouts?.map((c, i) => <p key={i} className="callout"><b>{c.name}:</b> {c.text}</p>)}
         {m.question && <p className="ask"><b>{m.question.text}</b>{m.question.why && <small>{m.question.why}</small>}</p>}
         {m.comparison && <button className="link" onClick={() => onOpenComparison(m.comparison)}>Open the comparison table</button>}

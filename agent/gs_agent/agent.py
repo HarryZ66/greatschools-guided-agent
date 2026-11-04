@@ -21,6 +21,7 @@ from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models import BedrockModel, CacheConfig
 
 from . import gateway_client as G
+from . import knowledge
 from . import needs as N
 from . import programs as P
 from . import search
@@ -204,6 +205,7 @@ class GuidedSession:
         self.chip_labels: dict[str, ChipLabel] = {}  # the agent's wording, kept across chip edits
         self.seen_ids: set[str] = set()  # every school a tool returned; evals check the model stays inside it
         self.seen_content: dict[str, str] = {}  # guide entry id -> title, for sources the model may cite
+        self.seen_documents: dict[str, str] = {}  # guide entry id -> knowledge base document it came from
         self.last_programs: dict | None = None
         self.programs_fresh = False  # show program cards only on the turn they were searched
         self.seen_programs: set[str] = set()
@@ -391,17 +393,25 @@ class GuidedSession:
                 return stop
             started = time.perf_counter()
             session.progress("Checking the parent guide…")
-            entries = lookup("lookup_guide", {"question": question}, "Amazon OpenSearch + Titan Embeddings", started)
+            # The guide is a Bedrock Knowledge Base when KNOWLEDGE_BASE_ID is set (decision 028)
+            backend = knowledge.SERVICE if knowledge.enabled() else "Amazon OpenSearch + Titan Embeddings"
+            entries = lookup("lookup_guide", {"question": question}, backend, started)
             if entries is None:
                 return json.dumps({"entries": [], "note": "The guide lookup failed; don't answer from memory."})
-            session._step("lookup_content", service("Amazon OpenSearch + Titan Embeddings"),
-                          "Searched the parent guide: " + (", ".join(e["title"] for e in entries) if entries
+
+            def named(e: dict) -> str:
+                return f"{e['title']} ({e['document']})" if e.get("document") else e["title"]
+
+            session._step("lookup_content", service(backend),
+                          "Searched the parent guide: " + (", ".join(named(e) for e in entries) if entries
                                                            else "no entry covers this, so I won't answer from memory"),
                           started)
             session.seen_content.update({e["id"]: e["title"] for e in entries})
+            session.seen_documents.update({e["id"]: e["document"] for e in entries if e.get("document")})
             if not entries:
                 return json.dumps({"entries": [], "note": "No guide entry covers this."})
-            return json.dumps({"entries": [{k: e[k] for k in ("id", "title", "body", "source")} for e in entries]})
+            return json.dumps({"entries": [{k: e[k] for k in ("id", "title", "body", "source", "document") if k in e}
+                                           for e in entries]})
 
         @tool
         def search_programs(interest: str, city: str = "", near_school_id: str = "", grades: list[str] | None = None,
@@ -637,7 +647,10 @@ class GuidedSession:
 
         if decision and decision.message and not self.comparison:  # a comparison carries it as its summary
             # Only entries lookup_content actually returned can be cited
-            sources = [{"id": s, "title": self.seen_content[s]} for s in decision.sources if s in self.seen_content]
+            # and each names the knowledge base document it came from, when it came from one
+            sources = [{"id": s, "title": self.seen_content[s],
+                        **({"document": self.seen_documents[s]} if s in self.seen_documents else {})}
+                       for s in decision.sources if s in self.seen_content]
             blocks.append({"type": "text", "markdown": decision.message, **({"sources": sources} if sources else {})})
 
         self.pending_question = None
