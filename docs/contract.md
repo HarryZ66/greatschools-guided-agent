@@ -301,11 +301,13 @@ The estimate subtracts the state scholarship's average award; always show it as 
 ### `text`
 
 Plain answer, e.g. a term definition. `sources` is present when the answer comes from the
-parent guide (P4); it lists only entries the `lookup_content` tool actually returned.
+parent guide (P4); it lists only entries the `lookup_content` tool actually returned. When the
+guide is the Bedrock Knowledge Base (decision 028), each source also has `document`: the name of
+the file in S3 that the entry was retrieved from.
 
 ```json
 {"type": "text", "markdown": "A charter school is a free public school run by its own board…",
- "sources": [{"id": "charter-school", "title": "Charter school"}]}
+ "sources": [{"id": "charter-school", "title": "Charter school", "document": "charter-school.md"}]}
 ```
 
 ## 5. Rules the backend enforces

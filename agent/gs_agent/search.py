@@ -10,6 +10,7 @@ import boto3
 from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
 
 from . import funding
+from . import knowledge
 from . import needs as N
 from .config import EMBED_DIMS, EMBED_MODEL, REGION, SCHOOLS_INDEX, search_endpoint
 
@@ -321,7 +322,10 @@ def lookup_content(question: str, k: int = 3) -> list[dict]:
     An entry is relevant if its title or an alias matches the question's words (exact terms
     like "CTE"), or its meaning is close enough by vector similarity (paraphrases and other
     languages). Unrelated questions return nothing, so the agent says it has no guide entry.
+    With KNOWLEDGE_BASE_ID set, the entries come from the Bedrock Knowledge Base instead (decision 028).
     """
+    if knowledge.enabled():
+        return knowledge.lookup(question, k, frozenset(EVERYDAY_WORDS))
     fields = ["id", "kind", "title", "body", "source"]
     terms = " ".join(w for w in re.findall(r"[\w'-]+", question) if w.lower() not in EVERYDAY_WORDS)
     keyword = client().search(index=CONTENT_INDEX, body={

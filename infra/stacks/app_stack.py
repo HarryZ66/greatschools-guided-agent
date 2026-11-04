@@ -54,7 +54,7 @@ class AppStack(Stack):
     """
 
     def __init__(self, scope: Construct, construct_id: str, *, domain: opensearch.Domain,
-                 table: dynamodb.Table, **kwargs) -> None:
+                 table: dynamodb.Table, knowledge_base_id: str | None = None, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # Public subnets only, no NAT gateway: cheaper and faster to create. The task gets a
@@ -116,13 +116,15 @@ class AppStack(Stack):
 
         # AgentCore Gateway (decision 027): the agent's data lookups as MCP tools, served by one
         # Lambda function from the same code. IAM inbound auth: only the runtime's role may call it.
+        # The parent guide's Bedrock Knowledge Base (decision 028), when its id is given
+        kb_env = {"KNOWLEDGE_BASE_ID": knowledge_base_id} if knowledge_base_id else {}
         tools_fn = lambda_.DockerImageFunction(
             self, "GatewayToolsFunction",
             code=lambda_.DockerImageCode.from_image_asset(
                 str(REPO_ROOT / "agent"), file="Dockerfile.tools", platform=ecr_assets.Platform.LINUX_ARM64),
             architecture=lambda_.Architecture.ARM_64, memory_size=1024, timeout=Duration.seconds(30),
             description="GreatSchools agent data tools behind the AgentCore Gateway",
-            environment={"SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}"},
+            environment={"SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}", **kb_env},
             log_group=logs.LogGroup(self, "GatewayToolsLogs", retention=logs.RetentionDays.TWO_WEEKS,
                                     removal_policy=RemovalPolicy.DESTROY))
         # Read-only, but searches are POSTs (grant_read only allows GET and HEAD)
@@ -182,9 +184,15 @@ class AppStack(Stack):
                 "AWS_DEFAULT_REGION": self.region,
                 "SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}",
                 "TABLE_NAME": table.table_name,
+                **kb_env,
             },
         )
         runtime.node.add_dependency(runtime_role)
+        if knowledge_base_id:
+            for grantee in (tools_fn.role, runtime_role):
+                grantee.add_to_principal_policy(iam.PolicyStatement(
+                    actions=["bedrock:Retrieve"],
+                    resources=[f"arn:aws:bedrock:{self.region}:{self.account}:knowledge-base/{knowledge_base_id}"]))
 
         # AgentCore Observability (decision 026). CloudWatch Transaction Search stores X-Ray spans
         # in CloudWatch Logs, where the GenAI Observability dashboard reads them. The agent sends its
