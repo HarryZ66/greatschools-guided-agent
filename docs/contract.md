@@ -29,7 +29,8 @@ Each need is used as `require`, `prefer` or `avoid`.
 | `arts` | "art", "music", "drama" | boost `osp.arts_*` present | `osp.arts_visual`, `osp.arts_music`, `osp.arts_performing_written` | |
 | `sports` | "soccer", "sports" | boost `osp.boys_sports` / `osp.girls_sports` | same | |
 | `college_prep` | "college prep", "AP classes" | boost `ap_courses`, `college_readiness_rating` | `ap_courses`, `college_readiness_rating`, `career_prep.tier` | High schools only. |
-| `cost` | "free", "affordable", "under $X" | filter public/charter, or tuition range | **`tuition` (synthetic, to add)** | Not in sample data. |
+| `mental_health` | "counseling", "he's been anxious" | boost `osp.mental_health` counselors / specialists | `osp.mental_health`, review topic `Mental Health` | GreatSchools: a top-5 parent concern that parents rarely raise; often offered as a suggestion. |
+| `cost` | "free", "affordable", "under $X" | filter public/charter, or tuition range | `tuition` (synthetic), `funding.json` typical award | Over budget: note shows the estimate after a typical Florida scholarship; partial if that fits the budget. |
 
 ## 2. Status rules (decided by code, never by the model)
 
@@ -102,11 +103,17 @@ from a search that ran this turn (never an earlier one) or the comparison table,
 
 Saving and feedback skip the agent entirely:
 
-- `POST /api/saved`: `{session_id, school_id}` → `{saved: [...]}`
+- `POST /api/saved`: `{session_id, school_id}` → `{saved: [...], programs: [...]}`. `programs` (at most
+  3) are library or community programs near that school that cover one of the parent's needs it
+  doesn't fully meet; each has the `program_results` fields plus `fills_need` and a code-written `why`
+  ("Care at Tamarind Cove ends at 5:00 PM. After-School Homework Help … runs 3:30 PM–6:00 PM …").
 - `GET /api/saved?session_id=…` → `{saved: [{school_id, name, at}]}`
 - `DELETE /api/saved/{school_id}?session_id=…` → `{saved: [...]}`
 - `POST /api/feedback`: `{session_id, school_id, vote: "up" | "down"}`
-- `GET /api/schools/{school_id}`: full school record (profile view)
+- `GET /api/schools/{school_id}?session_id=…`: the school record plus a verified `profile` (P3):
+  `criteria` (that session's needs, same rules as the cards), `quality_flags`, `reviews`
+  (`by_topic` recent/older counts, up to 3 dated `excerpts` marked `older` past 3 years, `total`),
+  `terms` (guide entries that explain fields on the page) and `cost`. No model call.
 - `GET /api/metrics`: `{searches, saves, saves_to_searches, thumbs_up, thumbs_down, relevance, criteria_per_search}`
 
 A `compare` turn returns `criteria_chips` and a `comparison` block (no `school_results`);
@@ -187,6 +194,7 @@ Streamed while the agent works (the "I checked this for you" trace).
       "score": 0.82,
       "criteria": [ {"need": "...", "status": "...", "evidence": [], "note": "..."} ],
       "watch_out": "Attendance tier is 'poor', and two recent reviews mention understaffing.",
+      "cost": {"tuition": 0},
       "saved": false
     }
   ]
@@ -214,6 +222,11 @@ come from code; programs with only past sessions are never listed (they are name
   "excluded_past": [{"name": "Summer Robotics Camp", "organization": "Biscayne Reach Library", "city": "Miami"}]
 }
 ```
+
+`cost` is `{"tuition": 0}` for public and charter schools, `{"tuition": null}` when a private
+school lists none, and for listed private tuition
+`{"tuition": 16500, "after_aid_estimate": 8300, "aid": ["fl_fes_eo_ftc"], "aid_typical_amount": 8200, "aid_as_of": "2024-25"}`.
+The estimate subtracts the state scholarship's average award; always show it as an estimate.
 
 ### `evidence_callout`
 

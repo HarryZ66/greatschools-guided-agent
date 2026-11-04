@@ -9,6 +9,7 @@ from typing import Any, Callable
 import boto3
 from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
 
+from . import funding
 from . import needs as N
 from .config import EMBED_DIMS, EMBED_MODEL, REGION, SCHOOLS_INDEX, search_endpoint
 
@@ -95,6 +96,8 @@ BOOSTS: dict[str, Callable[[Any], list[tuple[dict, float]]]] = {
     "safety": lambda v: [(_reviews_positive("Bullying / Safety"), 1.0),
                          ({"terms": {"osp.mental_health": ["anti_bullying"]}}, 0.5)],
     "attendance": lambda v: [({"term": {"high_attendance.tier": "good"}}, 2.0)],
+    "mental_health": lambda v: [({"terms": {"osp.mental_health": sorted(N.MENTAL_HEALTH_STAFF)}}, 2.0),
+                                (_reviews_positive("Mental Health"), 0.5)],
     "arts": lambda v: [(q, 1.0) for q in _exists("osp.arts_visual", "osp.arts_music", "osp.arts_performing_written")],
     "sports": lambda v: [(q, 1.0) for q in _exists("osp.boys_sports", "osp.girls_sports")],
     "college_prep": lambda v: [({"exists": {"field": "ap_courses"}}, 1.5),
@@ -196,6 +199,7 @@ def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) ->
             "score": round(final, 3),
             "criteria": criteria,
             "quality_flags": N.quality_flags(school),
+            "cost": funding.cost_summary(school),
         })
     results.sort(key=lambda r: r["score"], reverse=True)
     for rank, r in enumerate(results, 1):

@@ -18,6 +18,21 @@ schools with evidence. It says so when data is missing or stale instead of guess
 | `evals/` | Test queries and evaluation scripts |
 | `docs/` | Architecture notes and decision records |
 
+## Choices we made
+
+GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisions.md`](docs/decisions.md).
+
+| Area | Our choice |
+|---|---|
+| Language | Python for the agent, API, data scripts and infrastructure; React for the parent app |
+| Model | Claude Sonnet 5.5 on Bedrock for the agent, with prompt caching; Titan Text Embeddings v2 for semantic search. Haiku 5.5 was evaluated as a cheaper option (see Evaluation) |
+| How agentic | A guided agent. The model picks its tools (school search, school profile, find by name, parent guide, programs), asks at most one question per turn, spots gaps and suggests needs. Code decides every status, score, trade-off and piece of evidence. At most 6 tool calls per turn |
+| Agent framework | Strands Agents |
+| Compute | One ARM64 Fargate task behind an ALB, reached only through CloudFront and AWS WAF |
+| Infrastructure as code | AWS CDK (Python) |
+| Frontend | Single-page app served from S3 through CloudFront (a test page until the React app is built) |
+| Scope | Schools, plus library and community programs that fill a school's gaps (decision 010) |
+
 ## AWS services
 
 | Service | Role |
@@ -106,9 +121,9 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvi
 |---|---|
 | `POST /api/turn` | Query, answer a question, compare two schools, or edit a chip (see `docs/contract.md`) |
 | `POST /api/turn/stream` | Same, as server-sent events: progress while the agent works, then the result |
-| `POST /api/saved`, `GET /api/saved?session_id=`, `DELETE /api/saved/{school_id}?session_id=` | Saved list |
+| `POST /api/saved`, `GET /api/saved?session_id=`, `DELETE /api/saved/{school_id}?session_id=` | Saved list; saving returns programs that fill that school's gaps |
 | `POST /api/feedback` | Thumbs up/down on a result |
-| `GET /api/schools/{school_id}` | Full school record for the profile view |
+| `GET /api/schools/{school_id}?session_id=` | School record plus a verified profile: checks, review counts, guide terms, cost after aid |
 | `GET /api/metrics` | Saves-to-searches, thumbs relevance, criteria per search |
 | `GET /api/health` | Health check |
 
@@ -116,7 +131,7 @@ Try it from the command line without the API: `PYTHONPATH=. ../.venv/bin/python 
 
 ## Evaluation
 
-`evals/cases.json` holds 31 parent queries across core searches, missing information, honesty,
+`evals/cases.json` holds 33 parent queries across core searches, missing information, honesty,
 different family needs, fairness, guide questions (P4), programs and edge cases. `evals/run_evals.py` runs them and checks needs
 extraction, questions, refusals, and that every school the agent names was returned by a tool.
 
@@ -128,15 +143,15 @@ Latest run on Claude Sonnet 5.5 (full table in [`evals/results/latest.md`](evals
 
 | Metric | Result |
 |---|---|
-| Cases passed | 31 / 31 |
-| Needs extracted correctly | 14 / 14 |
+| Cases passed | 33 / 33 |
+| Needs extracted correctly | 16 / 16 |
 | Made-up school mentions | 0 |
 | Guide answers citing a guide entry | 5 / 5 (and none for a term the guide lacks) |
 | Program cases (fill a gap, interest match, past-only excluded, nothing found) | 5 / 5 |
 | Errors | 0 |
-| Latency per turn | median 7.0 s, max 18.2 s |
-| Tokens per turn | ~11,900, 79% of input served from the prompt cache |
-| Estimated cost per turn | ~$0.023 with prompt caching, vs ~$0.045 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
+| Latency per turn | median 6.9 s, max 14.5 s |
+| Tokens per turn | ~12,400, 79% of input served from the prompt cache |
+| Estimated cost per turn | ~$0.025 with prompt caching, vs ~$0.047 without (assuming $3 / $15 per million input / output tokens, cache reads at 10% and writes at 125% of the input price) |
 
 In 5 of 5 runs, the demo query found the library robotics club that covers Tamarind Cove's
 5–6pm care gap and asked the parent whether that works.
@@ -147,8 +162,8 @@ Load test against the deployed URL: 8 parents searching at the same moment all g
 Other tests:
 
 ```bash
-cd agent && ../.venv/bin/pytest -q tests                  # 38 unit tests of verify rules, hints, programs, query building, fallback (no AWS needed)
-python3 evals/smoke_api.py https://<cloudfront-domain>    # 25 end-to-end API checks against a deployment, including streaming
+cd agent && ../.venv/bin/pytest -q tests                  # 51 unit tests of verify rules, hints, programs, query building, fallback, cost, profile (no AWS needed)
+python3 evals/smoke_api.py https://<cloudfront-domain>    # 26 end-to-end API checks against a deployment, including streaming
 ```
 
 Before a demo, clear test traffic from `/api/metrics`:

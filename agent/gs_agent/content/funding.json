@@ -1,0 +1,29 @@
+{
+  "_about": "Funding programs used to estimate cost after aid. Facts come from official sources with the year they apply to. Amounts are averages: a family's actual award depends on grade and county. GreatSchools should review before real use.",
+  "programs": [
+    {
+      "id": "fl_fes_eo_ftc",
+      "name": "Florida Family Empowerment Scholarship (FES-EO) and Florida Tax Credit Scholarship (FTC)",
+      "short_name": "Florida scholarship",
+      "status": "available",
+      "eligibility": "Any Florida K-12 student can apply; income limits and the enrollment cap were removed in 2023-24.",
+      "typical_amount": 8200,
+      "typical_amount_basis": "Average FES-EO award in 2024-25, the latest statewide average the Florida Department of Education reports. Actual amounts depend on grade level and county.",
+      "as_of": "2024-25",
+      "how_to_apply": "Apply through Step Up For Students (stepupforstudents.org).",
+      "source": "https://www.fldoe.org/core/fileparse.php/18766/urlt/FES-EO-FAQs.pdf"
+    },
+    {
+      "id": "federal_tax_credit_sgo",
+      "name": "Federal tax-credit scholarships",
+      "short_name": "federal tax-credit scholarship",
+      "status": "coming_soon",
+      "eligibility": "Details pending. The program takes effect in 2027.",
+      "typical_amount": null,
+      "typical_amount_basis": "No amounts yet: always say details are pending.",
+      "as_of": "2027",
+      "how_to_apply": "Not open yet.",
+      "source": "GreatSchools hackathon brief (Vision doc, Why Now)"
+    }
+  ]
+}

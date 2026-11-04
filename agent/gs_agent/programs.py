@@ -57,6 +57,78 @@ def _flags(program: dict) -> list[dict]:
     return flags
 
 
+# Which program interest can fill which unmet need (from Sanchit's next-steps plan)
+NEED_INTEREST = {
+    "after_school_care": "after-school homework help and care",
+    "stem": "STEM robotics coding club",
+    "mental_health": "teen support counseling group",
+    "arts": "art class",
+    "college_prep": "tutoring test prep college application help",
+    "ell_support": "English classes for families",
+    "sports": "youth sports clinic",
+}
+GAP_WORDING = {N.MISSING: "doesn't list", N.PARTIAL: "only partly offers", N.ATTENTION: "falls short on"}
+
+
+def _clock(hhmm: str) -> str:
+    h, m = map(int, hhmm.split(":"))
+    return f"{(h - 1) % 12 + 1}:{m:02d} {'AM' if h < 12 else 'PM'}"
+
+
+def _school_day_end(school: dict) -> str:
+    """When the school day ends, as "HH:MM", from the profile's "3:00 PM"; 15:00 if not listed."""
+    raw = (school.get("osp", {}).get("end_time") or ["3:00 PM"])[0]
+    try:
+        t, ampm = raw.strip().split()
+        h, m = map(int, t.split(":"))
+        return f"{h % 12 + (12 if ampm.upper() == 'PM' else 0):02d}:{m:02d}"
+    except ValueError:
+        return "15:00"
+
+
+def for_saved_school(school_id: str, school: dict, needs: list[dict], size: int = 3) -> list[dict]:
+    """Programs near a saved school that cover a need the school doesn't fully meet.
+
+    Code decides the gaps (needs.verify), the matches and the `why`; no model call. Only
+    programs with upcoming sessions are offered (find_programs drops past-only ones).
+    """
+    grades = next((n.get("value") for n in needs if n["need"] == "grade_level"), None)
+    picks, seen = [], set()
+    for need in needs:
+        if need["need"] not in NEED_INTEREST:
+            continue
+        check = N.verify(school, dict(need))
+        if check["status"] == N.CONFIRMED:
+            continue
+        time_from = time_to = ""
+        if need["need"] == "after_school_care":
+            ends = next((e["value"] for e in check["evidence"] if e["field"] == "after_care_end_time"), None)
+            time_from, time_to = ends or _school_day_end(school), need.get("value") or "18:00"
+        found = find_programs(NEED_INTEREST[need["need"]], near_school_id=school_id, grades=grades,
+                              time_from=time_from, time_to=time_to, size=3)["programs"]
+        if time_from:  # a care gap is only filled by a program that covers the time
+            found = [p for p in found if (p["time_fit"] or {}).get("status") == N.CONFIRMED]
+        for p in found:
+            if p["program_id"] in seen:
+                continue
+            seen.add(p["program_id"])
+            session = p["next_sessions"][0]
+            label = N.CATALOG[need["need"]]["label"]
+            if not label.split()[0].isupper():  # keep acronyms like "STEM"
+                label = label[0].lower() + label[1:]
+            if time_from:
+                gap = (f"Care at {school['name']} ends at {_clock(time_from)}." if check["evidence"]
+                       else f"{school['name']} doesn't list after-school care.")
+            else:
+                gap = f"{school['name']} {GAP_WORDING.get(check['status'], 'may not offer')} {label}."
+            why = (f"{gap} {p['name']} at {p['organization']} runs {_clock(session['start'])}–{_clock(session['end'])} "
+                   f"on {', '.join(p['meets_on'])}, {p['distance_km']} km away ({p['cost'].lower()}).")
+            picks.append({**p, "fills_need": need["need"], "why": why})
+            break  # one program per gap
+    picks.sort(key=lambda p: (p["cost"] != "Free", p["distance_km"], p["next_sessions"][0]["date"]))
+    return picks[:size]
+
+
 def find_programs(interest: str = "", city: str = "", near_school_id: str = "", grades: list[str] | None = None,
                   time_from: str = "", time_to: str = "", size: int = 5) -> dict:
     """Programs with upcoming sessions near a city or a school, best match first."""

@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import search, store
+from . import profile, programs, search, store
 from .agent import GuidedSession
 
 log = logging.getLogger("gs_agent.api")
@@ -155,9 +155,17 @@ def save(request: SaveRequest) -> dict:
     if school is None:
         raise HTTPException(status_code=404, detail="Unknown school")
     store.save_school(request.session_id, request.school_id, school.get("name"))
-    if request.session_id in _sessions:
-        _sessions[request.session_id].saved.add(request.school_id)
-    return {"saved": store.saved_schools(request.session_id)}
+    session = _sessions.get(request.session_id)
+    if session:
+        session.saved.add(request.school_id)
+    # Programs that fill this school's gaps for this parent's needs (code only, no model call)
+    pairs = []
+    if session and session.needs:
+        try:
+            pairs = programs.for_saved_school(request.school_id, school, session.needs)
+        except Exception:
+            log.exception("could not match programs for %s", request.school_id)
+    return {"saved": store.saved_schools(request.session_id), "programs": pairs}
 
 
 @app.get("/api/saved")
@@ -180,12 +188,17 @@ def feedback(request: FeedbackRequest) -> dict:
 
 
 @app.get("/api/schools/{school_id}")
-def school_profile(school_id: str) -> dict:
-    """Full record for the profile view (P3), without the embedding."""
+def school_profile(school_id: str, session_id: str | None = None) -> dict:
+    """The school's record plus a verified `profile` (P3), built in code with no model call.
+
+    With a session_id, the profile checks that parent's needs, the same way the cards do.
+    """
     school = search.get_school(school_id)
     if school is None:
         raise HTTPException(status_code=404, detail="Unknown school")
-    return school
+    session = _sessions.get(session_id) if session_id else None
+    needs = [dict(n) for n in session.needs] if session else []
+    return {**school, "profile": profile.build(school, needs)}
 
 
 @app.get("/api/metrics")
