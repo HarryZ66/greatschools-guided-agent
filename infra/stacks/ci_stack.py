@@ -17,7 +17,9 @@ from aws_cdk import CfnOutput, Stack
 from aws_cdk import aws_iam as iam
 from constructs import Construct
 
-GITHUB_REPO = "HarryZ66/greatschools-guided-agent"
+# GitHub's token names the repo with its owner's and its own permanent ids, so a renamed or
+# re-created repo with the same name can't use these roles
+GITHUB_REPO = "HarryZ66@234244531/greatschools-guided-agent@1444761843"
 GITHUB_OIDC = "token.actions.githubusercontent.com"
 
 
