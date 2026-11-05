@@ -355,3 +355,20 @@ over never empties My list. Saves are in DynamoDB, so they also survive a server
   the raw "17:00", so grounding checks are unchanged.
 - **My list for returning parents.** The app stores the session id, starts a fresh conversation on
   load with `new_search` (decision 029) and shows "My list (n)" on the home page.
+
+## 031: School fit and programs appear when a parent opens a card
+
+Parents need to understand a school's trade-offs before saving it. Opening a school now leads
+with "How it fits": its confirmed needs, then the needs that are partial, missing or need
+attention. Each gap can show a nearby program that could help, with the program's schedule,
+cost, distance and a code-written explanation. The school card, its name and its details button
+open this view; saving and comparing remain separate actions.
+
+The profile endpoint shares the saved-school program matcher (decision 020), using the current
+session's needs and the selected school. It suggests at most one distinct program per gap;
+unsupported gaps and searches without matches remain explicit, without inventing compensation.
+Avoided activities are never suggested, and a care program must cover the gap in all displayed
+sessions. Suggestions do not turn uncertain school information into confirmed fit. If program
+search fails, the profile still returns its checks and marks the lookup unavailable. A parent
+without active search needs is prompted to describe them. Opening a card does not save it or
+call the conversational model.

@@ -118,10 +118,12 @@ function SchoolCard({ r, labels, checked, onToggle, saved, onSave, onDetails }) 
   const shaky = r.quality_flags?.length > 0
   const level = shaky ? 'mid' : yes === total ? 'hi' : yes * 2 >= total ? 'mid' : 'lo'
   return (
-    <article className={'card' + (checked ? ' sel' : '')}>
+    <article className={'card school-card' + (checked ? ' sel' : '')} onClick={e => {
+      if (!e.target.closest('button, a, input, label')) onDetails(r)
+    }}>
       <header className="card-head">
         <div className="title">
-          <h3><span className="rank" aria-label={`Rank ${r.rank}`}>{r.rank}</span>{r.name}</h3>
+          <h3><span className="rank" aria-label={`Rank ${r.rank}`}>{r.rank}</span><button className="school-name" onClick={() => onDetails(r)}>{r.name}</button></h3>
           <p className="meta">{TYPE[r.entity_type] || r.entity_type} · {r.city}{r.cost && <> · <Cost cost={r.cost} /></>}</p>
         </div>
         <div className="card-side">
@@ -133,7 +135,7 @@ function SchoolCard({ r, labels, checked, onToggle, saved, onSave, onDetails }) 
       <Checks criteria={r.criteria} labels={labels} />
       {r.watch_out && <p className="watch"><b>Good to know:</b> {r.watch_out}</p>}
       <footer className="card-foot">
-        <button className="link" onClick={() => onDetails(r)}>See details and reviews</button>
+        <button className="link" onClick={() => onDetails(r)}>See fit, programs and reviews</button>
         <label className="cmp"><input type="checkbox" checked={checked} onChange={() => onToggle(r.school_id)} /> Compare</label>
       </footer>
     </article>
@@ -180,11 +182,50 @@ function CompareModal({ data, labels, onClose }) {
   )
 }
 
+function SchoolFit({ profile, labels }) {
+  const criteria = profile.criteria || []
+  const confirmed = criteria.filter(c => c.status === 'confirmed')
+  const gaps = criteria.filter(c => c.status !== 'confirmed')
+  return (
+    <section className="school-fit" aria-label="How it fits">
+      <h4>How it fits</h4>
+      {!criteria.length ? <p className="meta">Tell us what matters to your family in the search to see this school’s fit and nearby programs.</p> : <>
+        <p className="meta">{confirmed.length} of {criteria.length} needs confirmed for this school.</p>
+        {confirmed.length > 0 && <Checks criteria={confirmed} labels={labels} />}
+        {gaps.length > 0 && <>
+          <h4>Where you may need extra support</h4>
+          <p className="meta">Nearby programs may help with some gaps. Missing or older school information still needs checking with the school.</p>
+          {gaps.map(c => {
+            const matches = (profile.programs || []).filter(p => p.fills_need === c.need)
+            return <div className="fit-gap" key={c.need}>
+              <Checks criteria={[c]} labels={labels} />
+              {matches.length > 0 ? <>
+                <p className="program-label">A nearby option that could help</p>
+                {matches.map(p => <ProgramCard key={p.program_id} p={p} />)}
+              </> : <p className="meta gap-empty">{profile.programs_status !== 'ready'
+                ? 'We couldn’t check nearby programs. Try opening this school again.'
+                : 'No suitable program to suggest for this need yet. Ask the school about your options.'}</p>}
+            </div>
+          })}
+          {(profile.programs || []).length > 0 && <p className="meta">Check availability, eligibility and travel between the school and program before making plans.</p>}
+        </>}
+      </>}
+    </section>
+  )
+}
+
 // P3: the verified profile for one school, built by the backend's code for this parent's needs.
 function Details({ school, sessionId, labels, saved, onSave, onClose }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
-  useEffect(() => { getSchool(sessionId, school.school_id).then(setData).catch(e => setError(e.message)) }, [sessionId, school.school_id])
+  useEffect(() => {
+    let active = true
+    setData(null); setError(null)
+    getSchool(sessionId, school.school_id)
+      .then(result => { if (active) setData(result) })
+      .catch(e => { if (active) setError(e.message) })
+    return () => { active = false }
+  }, [sessionId, school.school_id])
   useEffect(() => { const f = e => e.key === 'Escape' && onClose(); window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f) }, [onClose])
   const p = data?.profile
   const flagged = new Set((p?.quality_flags || []).map(f => f.field))
@@ -206,9 +247,10 @@ function Details({ school, sessionId, labels, saved, onSave, onClose }) {
         {error && <p className="watch">I couldn’t load this school: {error}</p>}
         {!data && !error && <p className="meta">Loading…</p>}
         {p && <>
+          <SchoolFit profile={p} labels={labels} />
+          <h4>School details</h4>
           {facts.length > 0 && <dl className="facts">{facts.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>}
           {p.cost && <p className="meta"><Cost cost={p.cost} /></p>}
-          {p.criteria?.length > 0 && <><h4>How it fits what you asked for</h4><Checks criteria={p.criteria} labels={labels} /></>}
           <h4>What parents say</h4>
           {p.reviews?.total ? <>
             <p className="meta">{p.reviews.total} review{p.reviews.total === 1 ? '' : 's'}</p>
@@ -517,7 +559,7 @@ export default function App() {
         </div>
       </section>
       {comparison && <CompareModal data={comparison} labels={labels} onClose={() => setComparison(null)} />}
-      {details && <Details school={details} sessionId={sessionId} labels={labels} saved={saved.has(details.school_id)}
+      {details && <Details key={details.school_id} school={details} sessionId={sessionId} labels={labels} saved={saved.has(details.school_id)}
         onSave={toggleSave} onClose={() => setDetails(null)} />}
     </div>
   )

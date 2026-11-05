@@ -85,8 +85,8 @@ def _school_day_end(school: dict) -> str:
         return "15:00"
 
 
-def for_saved_school(school_id: str, school: dict, needs: list[dict], size: int = 3) -> list[dict]:
-    """Programs near a saved school that cover a need the school doesn't fully meet.
+def for_school(school_id: str, school: dict, needs: list[dict], size: int = 3) -> list[dict]:
+    """Programs near a school that could help with a need it doesn't fully meet.
 
     Code decides the gaps (needs.verify), the matches and the `why`; no model call. Only
     programs with upcoming sessions are offered (find_programs drops past-only ones).
@@ -97,16 +97,20 @@ def for_saved_school(school_id: str, school: dict, needs: list[dict], size: int 
         if need["need"] not in NEED_INTEREST:
             continue
         check = N.verify(school, dict(need))
-        if check["status"] == N.CONFIRMED:
+        if check["status"] == N.CONFIRMED or check["mode"] == "avoid":
             continue
         time_from = time_to = ""
         if need["need"] == "after_school_care":
             ends = next((e["value"] for e in check["evidence"] if e["field"] == "after_care_end_time"), None)
             time_from, time_to = ends or _school_day_end(school), need.get("value") or "18:00"
+            if time_from >= time_to:
+                continue  # stale hours can be partial without leaving an actual time gap
         found = find_programs(NEED_INTEREST[need["need"]], near_school_id=school_id, grades=grades,
                               time_from=time_from, time_to=time_to, size=3)["programs"]
         if time_from:  # a care gap is only filled by a program that covers the time
-            found = [p for p in found if (p["time_fit"] or {}).get("status") == N.CONFIRMED]
+            found = [p for p in found if (p["time_fit"] or {}).get("status") == N.CONFIRMED
+                     and p["next_sessions"] and all(
+                         s["start"] <= time_from and s["end"] >= time_to for s in p["next_sessions"])]
         for p in found:
             if p["program_id"] in seen:
                 continue
@@ -116,7 +120,7 @@ def for_saved_school(school_id: str, school: dict, needs: list[dict], size: int 
             if not label.split()[0].isupper():  # keep acronyms like "STEM"
                 label = label[0].lower() + label[1:]
             if time_from:
-                gap = (f"Care at {school['name']} ends at {_clock(time_from)}." if check["evidence"]
+                gap = (f"Care at {school['name']} ends at {_clock(time_from)}." if ends
                        else f"{school['name']} doesn't list after-school care.")
             else:
                 gap = f"{school['name']} {GAP_WORDING.get(check['status'], 'may not offer')} {label}."

@@ -226,7 +226,7 @@ def save(request: SaveRequest) -> dict:
     pairs = []
     if session and session.needs:
         try:
-            pairs = programs.for_saved_school(request.school_id, school, session.needs)
+            pairs = programs.for_school(request.school_id, school, session.needs)
         except Exception:
             log.exception("could not match programs for %s", request.school_id)
     return {"saved": store.saved_schools(request.session_id), "programs": pairs}
@@ -268,7 +268,16 @@ def school_profile(school_id: str, session_id: str | None = None) -> dict:
         raise HTTPException(status_code=404, detail="Unknown school")
     session = _sessions.get(session_id) if session_id else None
     needs = [dict(n) for n in session.needs] if session else []
-    return {**school, "profile": profile.build(school, needs)}
+    verified = profile.build(school, needs)
+    verified["programs"] = []
+    verified["programs_status"] = "ready"
+    if needs:
+        try:
+            verified["programs"] = programs.for_school(school_id, school, needs, size=len(needs))
+        except Exception:
+            log.exception("could not match profile programs for %s", school_id)
+            verified["programs_status"] = "unavailable"
+    return {**school, "profile": verified}
 
 
 @app.get("/api/metrics")

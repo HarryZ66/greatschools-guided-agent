@@ -99,7 +99,7 @@ def test_school_day_end_parses_the_profile_time():
 def test_no_programs_when_every_need_is_met(monkeypatch):
     monkeypatch.setattr(P, "find_programs", lambda *a, **k: (_ for _ in ()).throw(AssertionError("searched")))
     school = {"name": "Good School", "osp": {"school_sub_type": ["STEM"]}, "osp_as_of": "2026-09-01"}
-    assert P.for_saved_school("x", school, [{"need": "stem", "mode": "require"}]) == []
+    assert P.for_school("x", school, [{"need": "stem", "mode": "require"}]) == []
 
 
 def test_care_gap_is_filled_only_by_a_program_covering_the_time(monkeypatch):
@@ -113,6 +113,6 @@ def test_care_gap_is_filled_only_by_a_program_covering_the_time(monkeypatch):
              "next_sessions": [{"date": "2026-11-05", "start": "17:00", "end": "18:30"}]}]}
     monkeypatch.setattr(P, "find_programs", fake)
     school = {"name": "Tamarind Cove", "after_care_end_time": "17:00", "after_care_as_of": "2026-09-01"}
-    picks = P.for_saved_school("t", school, [{"need": "after_school_care", "mode": "require", "value": "18:00"}])
+    picks = P.for_school("t", school, [{"need": "after_school_care", "mode": "require", "value": "18:00"}])
     assert [p["program_id"] for p in picks] == ["late"]
     assert picks[0]["why"].startswith("Care at Tamarind Cove ends at 5:00 PM.")
