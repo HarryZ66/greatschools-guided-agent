@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useId, forwardRef } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useId, forwardRef } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence, MotionConfig } from 'motion/react'
 import logo from './assets/greatschools-logo.png'
 import { turn, saveSchool, unsaveSchool, rateReply, getSchool } from './api.js'
@@ -18,6 +19,10 @@ const EXAMPLES = [
   'Free elementary school in Hialeah with help learning English',
   'My son has ADHD and needs extra help in class. High school near Doral',
 ]
+
+const PAGE = 4  // cards shown at first; "View more schools" adds this many (decision 041)
+// A school's distinctive words ("Tamarind Cove" from "Tamarind Cove STEM Academy"), to spot it in a reply
+const core = name => (name || '').replace(/\b(Elementary|Middle|High|Senior|Junior|Charter|Preparatory|Prep|STEM|Academy|School|Center|K-8)\b/g, '').replace(/\s+/g, ' ').trim()
 
 const humanize = id => (id || '').replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())
 const money = n => '$' + Number(n).toLocaleString('en-US')
@@ -110,33 +115,97 @@ function Checks({ criteria, labels }) {
   )
 }
 
-function Chips({ block, onRemove, onAdd, busy }) {
+const BUCKETS = [['require', 'Must have'], ['prefer', 'Nice to have'], ['avoid', 'Avoid']]  // in this order on the chip line
+const pop = { initial: { opacity: 0, scale: 0.7 }, animate: { opacity: 1, scale: 1 }, exit: { opacity: 0, scale: 0.7 }, transition: spring }
+
+// A chip's own menu: move it to the other bucket, or turn it off. Words, not icons, so a parent
+// knows what each choice does; Escape or a click elsewhere closes it.
+function ChipMenu({ c, anchor, onMove, onOff, onClose }) {
+  const box = useRef(null)
+  const [at, setAt] = useState(null)
+  useLayoutEffect(() => {  // placed on the page, so a chip row that scrolls sideways can't clip it
+    const r = anchor.getBoundingClientRect()
+    setAt({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - 228)) })
+  }, [])
+  useEffect(() => {
+    box.current?.querySelector('button')?.focus()
+    const key = e => { if (e.key === 'Escape') { onClose(); anchor.querySelector('.clabel')?.focus() } }
+    const away = e => { if (!box.current?.contains(e.target) && !anchor.contains(e.target)) onClose() }
+    const moved = e => { if (!box.current?.contains(e.target)) onClose() }
+    window.addEventListener('keydown', key); window.addEventListener('pointerdown', away)
+    window.addEventListener('scroll', moved, true); window.addEventListener('resize', onClose)
+    return () => {
+      window.removeEventListener('keydown', key); window.removeEventListener('pointerdown', away)
+      window.removeEventListener('scroll', moved, true); window.removeEventListener('resize', onClose)
+    }
+  }, [onClose, anchor])
+  const to = c.mode === 'require' ? ['prefer', 'Move to Nice to have'] : ['require', 'Move to Must have']
+  return (
+    <motion.div ref={box} className="chipmenu" role="menu" aria-label={`${c.label} options`} style={{ transformOrigin: 'top left', ...(at || { visibility: 'hidden' }) }}
+      initial={{ opacity: 0, scale: 0.94, y: -4 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }} transition={spring}>
+      {c.mode !== 'avoid' && <button role="menuitem" onClick={() => { onClose(); onMove(c, to[0]) }}>{to[1]}</button>}
+      <button role="menuitem" onClick={() => { onClose(); onOff(c) }}>Turn off</button>
+    </motion.div>
+  )
+}
+
+// What the parent asked for, on one line: "Must have" chips, then "Nice to have" chips, each
+// group named by a small label. Grade and place are fixed (search again to change them). Any
+// other chip opens a menu to move it to the other group or turn it off; × turns it off at once.
+// Turned-off chips stay at the end, faded, and one tap turns them back on. Chips slide to their
+// new place when they change group.
+function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
+  const [menu, setMenu] = useState(null)
   if (!block) return null
   const { chips = [], unmapped = [], suggested = [] } = block
+  const offList = [...off.values()].filter(o => !chips.some(c => c.need === o.need))
+  const menuChip = chips.find(c => c.need === menu?.need)
+  const flow = []
+  for (const [mode, title] of BUCKETS) {
+    const these = chips.filter(c => c.mode === mode)
+    if (!these.length) continue
+    flow.push(<motion.span key={'t-' + mode} layout="position" className="btitle">{title}</motion.span>)
+    for (const c of these) {
+      const fixed = FIXED_NEEDS.has(c.need)
+      flow.push(
+        <motion.span key={c.need} layout="position" {...pop}
+          className={'chip ' + c.mode + (c.source === 'inferred' ? ' inferred' : '') + (fixed ? ' fixed' : '')}
+          title={fixed ? 'Search again to change this' : c.source === 'inferred' ? 'I assumed this. Change it if it’s wrong.' : undefined}>
+          {fixed ? <span className="clabel">{c.label}</span> : (
+            <button className="clabel" disabled={busy} aria-haspopup="menu" aria-expanded={menu?.need === c.need}
+              onClick={e => { const el = e.currentTarget.parentElement; setMenu(m => m?.need === c.need ? null : { need: c.need, el }) }}>
+              {c.label}<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M3 4.5l3 3 3-3" /></svg>
+            </button>
+          )}
+          {!fixed && <button className="chipx" disabled={busy} onClick={() => onOff(c)} aria-label={`Turn off ${c.label}`} title="Turn off">×</button>}
+        </motion.span>)
+    }
+  }
+  for (const u of unmapped) {
+    flow.push(<motion.span key={'u-' + u} layout="position" {...pop} className="chip unmapped" title="We can’t check this in our data yet">{u}: can’t check yet</motion.span>)
+  }
+  for (const o of offList) {
+    flow.push(
+      <motion.button key={o.need} layout="position" {...pop} whileTap={{ scale: 0.94 }} className="chip off" disabled={busy}
+        onClick={() => onOn(o)} title="Turned off. Tap to turn it back on" aria-label={`Turn ${o.label} back on`}>
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 6.5h6a3 3 0 010 6H7M3.5 6.5L6 4M3.5 6.5L6 9" /></svg>{o.label}
+      </motion.button>)
+  }
   return (
-    <div className="chipbar">
-      {/* Added chips grow in and removed ones shrink away; the rest slide over to make room */}
+    <div className="buckets">
+      {/* The menu goes on the page body: the sticky header's blur would offset a fixed position */}
+      {createPortal(<AnimatePresence>{menuChip && !busy && <ChipMenu key={menuChip.need} c={menuChip} anchor={menu.el}
+        onMove={onMove} onOff={onOff} onClose={() => setMenu(null)} />}</AnimatePresence>, document.body)}
       <div className="chips" aria-label="What you asked for">
-        <AnimatePresence initial={false} mode="popLayout">
-          {chips.map(c => (
-            <motion.span key={c.need} layout transition={spring} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.7 }} className={'chip ' + c.mode + (c.source === 'inferred' ? ' inferred' : '')}
-              title={c.source === 'inferred' ? 'I assumed this. Remove it if it’s wrong.' : c.mode === 'require' ? 'Must have' : 'Nice to have'}>
-              {c.mode === 'require' && <i className="must">Must</i>}{c.mode === 'avoid' && <i className="must">Avoid</i>}{c.label}
-              {!FIXED_NEEDS.has(c.need) && <button className="chipx" disabled={busy} onClick={() => onRemove(c.need)} aria-label={`Remove ${c.label}`}>×</button>}
-            </motion.span>
-          ))}
-          {unmapped.map(u => <motion.span key={'u-' + u} layout exit={{ opacity: 0 }} className="chip unmapped" title="We can’t check this in our data yet">{u}: can’t check yet</motion.span>)}
-        </AnimatePresence>
+        <AnimatePresence initial={false} mode="popLayout">{flow}</AnimatePresence>
       </div>
       {suggested.length > 0 && (
         <div className="chips sugg">
-          <span className="hint">Also worth checking?</span>
+          <span className="btitle">Also worth checking?</span>
           <AnimatePresence initial={false} mode="popLayout">
             {suggested.map(s => (
-              <motion.button key={s.need} layout transition={spring} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.7 }} whileTap={{ scale: 0.94 }} className="chip suggested" disabled={busy} title={s.why}
-                onClick={() => onAdd(s.need)}>+ {s.label}</motion.button>
+              <motion.button key={s.need} layout="position" {...pop} whileTap={{ scale: 0.94 }} className="chip suggested" disabled={busy} title={s.why}
+                onClick={() => onAdd(s)}>+ {s.label}</motion.button>
             ))}
           </AnimatePresence>
         </div>
@@ -388,7 +457,7 @@ export function firstSentence(text) {
   return [t, '']
 }
 
-function Message({ m, live, onOption, onVote, onOpenComparison, busy }) {
+function Message({ m, live, canUndo, onUndo, onOption, onVote, onOpenComparison, busy }) {
   const [open, setOpen] = useState(false)
   const ai = m.r === 'ai' && !m.error
   const [summary, rest] = ai ? firstSentence(m.t) : [m.t, '']
@@ -428,6 +497,17 @@ function Message({ m, live, onOption, onVote, onOpenComparison, busy }) {
         {m.comparison && <button className="link" onClick={() => onOpenComparison(m.comparison)}>Open the comparison table</button>}
         {m.programs?.length > 0 && <div className="progs">{m.programs.map((p, i) => <ProgramCard key={p.program_id} p={p} i={i} />)}</div>}
       </div>
+      {/* Turning a need off is undone in one tap, right where the parent reads the result */}
+      <AnimatePresence>
+        {m.undo && canUndo && (
+          <motion.div className="choices" {...pop}>
+            <motion.button className="undo" whileTap={{ scale: 0.95 }} disabled={busy} onClick={() => onUndo(m.undo)}>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3.5 6.5h6a3 3 0 010 6H7M3.5 6.5L6 4M3.5 6.5L6 9" /></svg>
+              Turn “{m.undo.label}” back on
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {m.question && live && (
           <motion.div className="choices" initial="hidden" animate="show" exit={{ opacity: 0, transition: { duration: 0.15 } }} variants={stagger(0.05, 0.15)}>
@@ -460,7 +540,7 @@ function Typing({ progress }) {
   )
 }
 
-function Chat({ msgs, progress, busy, question, send, onOption, onVote, onOpenComparison }) {
+function Chat({ msgs, progress, busy, question, send, off, onUndo, onOption, onVote, onOpenComparison }) {
   const [text, setText] = useState('')
   const box = useRef(null)
   useEffect(() => { const b = box.current; if (b) b.scrollTop = b.scrollHeight }, [msgs, progress])
@@ -468,6 +548,7 @@ function Chat({ msgs, progress, busy, question, send, onOption, onVote, onOpenCo
     <aside className="chat">
       <div className="msgs" ref={box}>
         {msgs.map((m, i) => <Message key={i} m={m} live={!!m.question && m.question === question} busy={busy}
+          canUndo={!!m.undo && off.has(m.undo.need)} onUndo={onUndo}
           onOption={onOption} onVote={onVote} onOpenComparison={onOpenComparison} />)}
         <AnimatePresence>{busy && <Typing key="typing" progress={progress} />}</AnimatePresence>
       </div>
@@ -499,6 +580,8 @@ export default function App() {
   const [split, setSplit] = useState(58)
   const [pane, setPane] = useState('schools')  // phones show one pane at a time
   const [unread, setUnread] = useState(false)
+  const [off, setOff] = useState(new Map())  // need -> chip the parent turned off, to turn back on in one tap
+  const [shown, setShown] = useState(PAGE)  // how many school cards are on screen
   const paneNow = useRef('schools')  // the pane on screen when a reply lands (replies are async)
   useEffect(() => { paneNow.current = pane; if (pane === 'chat') setUnread(false) }, [pane])
   const wrap = useRef(null)
@@ -510,20 +593,25 @@ export default function App() {
 
   // Apply one /api/turn response: each block updates its part of the page, and the
   // turn's text, notes and question become one chat reply with its trace underneath.
-  const apply = (res, kind) => {
+  const apply = (res, kind, extra) => {
     session.current = res.session_id
     setSessionId(res.session_id)
     writeSid(res.session_id)
-    const reply = { r: 'ai', t: '', trace: res.trace, turn: res.turn }
+    const reply = { r: 'ai', t: '', trace: res.trace, turn: res.turn, ...(extra?.undo ? { undo: extra.undo } : {}) }
     let nextQuestion = null
+    const calloutIds = []
     const results = (res.blocks || []).find(b => b.type === 'school_results')?.results
     for (const b of res.blocks || []) {
-      if (b.type === 'criteria_chips') setChips(b)
+      if (b.type === 'criteria_chips') {
+        setChips(b)
+        setOff(prev => { const n = new Map(prev); (b.chips || []).forEach(c => n.delete(c.need)); return n })
+      }
       else if (b.type === 'text') { reply.t = reply.t ? `${reply.t}\n\n${b.markdown}` : b.markdown; if (b.sources) reply.sources = b.sources }
       else if (b.type === 'clarifying_question') nextQuestion = b
       else if (b.type === 'evidence_callout') {
         const name = (results || schools).find(r => r.school_id === b.school_id)?.name || 'One school'
         ;(reply.callouts ||= []).push({ name, text: b.text })
+        calloutIds.push(b.school_id)
       } else if (b.type === 'school_results') {
         setSchools(b.results)
         setSaved(prev => { const n = new Map(prev); b.results.filter(r => r.saved).forEach(r => n.set(r.school_id, r)); return n })
@@ -533,7 +621,15 @@ export default function App() {
     }
     if (nextQuestion) reply.question = nextQuestion
     if (!reply.t && !reply.question && !reply.callouts) {
-      reply.t = kind === 'chip_edit' ? 'I updated the results for your new list.' : 'Here’s what I found.'
+      reply.t = extra?.note || (kind === 'chip_edit' ? 'I updated the results for your new list.' : 'Here’s what I found.')
+    }
+    if (results) {
+      // A new search starts at the first 4 cards (a chip edit keeps what the parent opened), and
+      // every card the reply talks about is shown, so no school it names is hidden
+      const said = [reply.t, nextQuestion?.text, ...(reply.callouts || []).map(c => c.text)].join(' ')
+      let last = -1
+      results.forEach((r, i) => { const w = core(r.name); if (calloutIds.includes(r.school_id) || (w.length > 3 && said.includes(w))) last = i })
+      setShown(n => Math.max(kind === 'chip_edit' ? n : PAGE, Math.ceil((last + 1) / PAGE) * PAGE))
     }
     setQuestion(nextQuestion)
     addMsg(reply)
@@ -542,12 +638,12 @@ export default function App() {
     else if (paneNow.current !== 'chat') setUnread(true)
   }
 
-  const run = async (event, mine) => {
+  const run = async (event, mine, extra) => {
     if (busy) return
     if (mine) addMsg({ r: 'me', t: mine })
     setBusy(true); setProgress('')
     try {
-      apply(await turn(session.current, event, setProgress), event.type)
+      apply(await turn(session.current, event, setProgress), event.type, extra)
     } catch (e) {
       addMsg({ r: 'ai', t: e.message || 'Something went wrong. Please try again.', error: true })
     } finally {
@@ -566,11 +662,25 @@ export default function App() {
     ? run({ type: 'answer', question_id: question.question_id, text }, text)
     : run({ type: 'query', text }, text)
   const answer = (q, o) => run({ type: 'answer', question_id: q.question_id, option_id: o.id }, o.label)
-  const removeChip = need => run({ type: 'chip_edit', need, removed: true }, `Remove “${labels[need] || humanize(need)}”`)
-  const addChip = need => {
-    const s = chips?.suggested?.find(x => x.need === need)
-    run({ type: 'chip_edit', need, mode: 'prefer' }, `Add “${s?.label || humanize(need)}”`)
+  // Chip edits run in code on the server, no model call (decision 006)
+  const turnOff = c => {
+    if (busy) return
+    setOff(prev => new Map(prev).set(c.need, { need: c.need, label: c.label, mode: c.mode, value: c.value }))
+    run({ type: 'chip_edit', need: c.need, removed: true }, `Turn off “${c.label}”`,
+      { undo: { need: c.need, label: c.label }, note: `I turned off “${c.label}” and updated the schools.` })
   }
+  const turnOn = ({ need }) => {
+    const c = off.get(need)
+    if (!c || busy) return
+    run({ type: 'chip_edit', need, mode: c.mode, ...(c.value != null ? { value: c.value } : {}) }, `Turn “${c.label}” back on`,
+      { note: `“${c.label}” is back on, and the schools are updated.` })
+  }
+  const moveChip = (c, mode) => {
+    const where = mode === 'require' ? 'a must-have' : 'nice to have'
+    run({ type: 'chip_edit', need: c.need, mode }, `Make “${c.label}” ${where}`, { note: `“${c.label}” is now ${where}, and the schools are updated.` })
+  }
+  const addChip = s => run({ type: 'chip_edit', need: s.need, mode: 'prefer' }, `Add “${s.label}”`,
+    { note: `I added “${s.label}” as nice to have and updated the schools.` })
   const compare = () => run({ type: 'compare', school_ids: picked.slice(0, 2) }, `Compare ${picked.slice(0, 2).map(nameOf).join(' and ')}`)
 
   const toggleSave = async r => {
@@ -615,7 +725,7 @@ export default function App() {
   const newSearch = () => {
     setChips(null); setSchools([]); setPrograms(null); setMsgs([]); setQuestion(null)
     setPicked([]); setShowSaved(false); setQuery(''); setStage('home')
-    setPane('schools'); setUnread(false)
+    setPane('schools'); setUnread(false); setOff(new Map()); setShown(PAGE)
     restart(session.current)
   }
 
@@ -693,22 +803,31 @@ export default function App() {
         </div>
         <div className={'split pane-' + pane} ref={wrap}>
           <motion.div className="list" style={{ width: split + '%' }} layoutScroll>
-            <AnimatePresence>
-              {busy && schools.length > 0 && <motion.div key="bar" className="refresh" aria-hidden="true" {...fade} />}
-            </AnimatePresence>
-            <Chips block={chips} onRemove={removeChip} onAdd={addChip} busy={busy} />
+            {/* The filters stay put while the cards scroll under them */}
+            <div className="filters">
+              <Filters block={chips} off={off} onMove={moveChip} onOff={turnOff} onOn={turnOn} onAdd={addChip} busy={busy} />
+              <AnimatePresence>
+                {busy && schools.length > 0 && <motion.div key="bar" className="refresh" aria-hidden="true" {...fade} />}
+              </AnimatePresence>
+            </div>
             {schools.length > 0
-              ? <p className="count"><b>{schools.length} schools</b> match your search. Tap one to see how it fits each of your needs.</p>
+              ? <p className="count"><b>{schools.length} schools</b> match your search<span>. Tap one to see how it fits.</span></p>
               : <p className="count">{busy ? 'Looking for schools…' : sessionId ? 'Answer in the chat and I’ll find schools that fit.' : ''}</p>}
             {busy && !schools.length && <Placeholders />}
             <div className={'cards schools' + (busy && schools.length ? ' stale' : '')}>
               <AnimatePresence mode="popLayout">
-                {schools.map((r, i) => (
-                  <SchoolCard key={r.school_id} r={r} i={i} deps={schools} checked={picked.includes(r.school_id)} onToggle={toggle}
+                {schools.slice(0, shown).map((r, i) => (
+                  <SchoolCard key={r.school_id} r={r} i={i % PAGE} deps={schools} checked={picked.includes(r.school_id)} onToggle={toggle}
                     saved={saved.has(r.school_id)} onSave={toggleSave} onDetails={setDetails} />
                 ))}
               </AnimatePresence>
             </div>
+            {schools.length > shown && (
+              <div className="moreschools">
+                <motion.button whileTap={{ scale: 0.97 }} onClick={() => setShown(n => n + PAGE)}>View more schools</motion.button>
+                <span>{shown} of {schools.length} shown</span>
+              </div>
+            )}
             {programs?.programs?.length > 0 && (
               <>
                 <h4 className="sub">Programs nearby, run by libraries and community centers</h4>
@@ -723,6 +842,7 @@ export default function App() {
           <div className="bar" onPointerDown={drag} role="separator" aria-label="Resize panels" />
           <div className="chatw" style={{ width: 100 - split + '%' }}>
             <Chat msgs={msgs} progress={progress} busy={busy} question={question} send={send} onOption={answer}
+              off={off} onUndo={turnOn}
               onVote={vote} onOpenComparison={setComparison} />
           </div>
         </div>

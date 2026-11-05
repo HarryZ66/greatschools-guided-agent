@@ -36,11 +36,14 @@ for reduced motion.
   "Helpful?" votes and school details call `/api/saved`, `/api/feedback` and `/api/schools/{id}`
   directly (no model call).
 - `src/App.jsx` applies each response's blocks:
-  - `criteria_chips`: chips above the list ("Must" marks a must-have). Inferred chips are
-    highlighted; × sends a `chip_edit` remove (not offered for grade level and location). Unmapped
-    wishes show greyed; suggested needs sit under "Also worth checking?" as "+" chips that send a
-    `chip_edit` with mode `prefer`.
-  - `school_results`: short cards in a grid that fits as many columns as the list pane allows (one
+  - `criteria_chips`: a sticky two-line header above the cards (decision 041). Line one has the
+    "Must have" chips, then the "Nice to have" ones. Tapping a chip opens a menu to move it or turn
+    it off; × turns it off at once. Turned-off chips stay at the end of the line, faded, and tap to
+    turn back on; the chat reply also has a "Turn ... back on" button. Grade level and location are
+    fixed. Inferred chips are highlighted and unmapped wishes greyed. Line two, "Also worth
+    checking?", has 3 "+" chips that send a `chip_edit` with mode `prefer`.
+  - `school_results`: 4 cards at first, and "View more schools" adds 4 at a time (up to 16).
+    Short cards in a grid that fits as many columns as the list pane allows (one
     on a phone). Each card has a school-type tag (Public / Charter / Private), a heart to save, the
     name (opens the details panel), city and cost (after-aid amounts always marked as estimates),
     the school's one `badge` ("Best for ...", if it has one), "Good to know" (`watch_out`, two

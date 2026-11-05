@@ -90,7 +90,7 @@ Event types:
 | `query` | `text` | Yes |
 | `answer` | `question_id`, `option_id` or `text` | Yes |
 | `compare` | `school_ids` (2) | Yes |
-| `chip_edit` | `need`, `mode` (require/prefer/avoid) or `removed: true` | No: code re-runs search and verify |
+| `chip_edit` | `need`, `mode` (require/prefer/avoid) and optional `value`, or `removed: true` | No: code re-runs search and verify |
 | `new_search` | none | No: forgets the conversation, keeps the session and its saved list; the response adds `saved` |
 
 Omit `session_id` on the first turn; every response returns the `session_id` to send next time.
@@ -230,8 +230,15 @@ a service. Render `service` and `text` as given; new `tool` values may appear la
 `answered` (from a clarifying question).
 
 `unmapped` lists wishes the parent stated that no need can check yet (e.g. "Robotics club at the
-school"); show them as greyed chips. `suggested` holds up to 2 needs the parent didn't mention,
-each `{need, label, why}`; show them as tap-to-add chips that send a `chip_edit` with mode `prefer`.
+school"); show them as greyed chips. `suggested` holds 3 needs the parent didn't mention, each
+`{need, label, why}`; show them as tap-to-add chips that send a `chip_edit` with mode `prefer`. Up
+to 2 come from the model; code fills the rest from a fixed list (`MORE_NEEDS` in `agent.py`, with
+fixed reasons), so adding one always leaves more to choose from. Code never offers `special_ed`,
+`ell_support` or `cost`, and never offers a need the parent turned off (decision 041).
+
+A `chip_edit` with a `mode` and no `value` keeps the need's current value, so moving "Care until
+6pm" from must-have to nice-to-have keeps 6pm. `removed: true` turns the need off; sending it
+again with its `mode` and `value` turns it back on.
 
 ### `clarifying_question`
 
@@ -294,6 +301,11 @@ parent didn't ask about (`asked: false`), which never include `special_ed` or `e
 `rank` and `score` order the results and feed the trade-off hints; the parent app doesn't show
 them (no rank numbers, no "% fit"). The per-need `criteria` are shown in the details panel, not
 on the card.
+
+`results` holds up to 16 schools (`search.RESULTS`), plus any school a trade-off hint names. The
+app shows 4 and "View more schools" adds 4 at a time; it opens more at once when the reply names
+a school further down. The agent reads only the top 8 and the hinted ones (`search.model_view`),
+and the search's per-need counts cover those same schools (decision 041).
 
 ### `program_results`
 
