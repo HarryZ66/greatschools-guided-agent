@@ -47,14 +47,16 @@ class DataStack(Stack):
             )
         )
 
-        # One table for sessions, saved schools and feedback.
-        # pk = SESSION#<id>; sk = STATE | SAVED#<school_id> | FEEDBACK#<ts>
+        # One table for saved schools, feedback, search metrics and cached first-turn answers.
+        # pk = SESSION#<id>; sk = SAVED#<school_id> | FEEDBACK#... | SEARCH#<ts>. pk = CACHE#<key>; sk = TURN.
+        # Cached answers carry `expires` (epoch seconds); TTL deletes them (decision 035).
         self.table = dynamodb.Table(
             self,
             "AppTable",
             partition_key=dynamodb.Attribute(name="pk", type=dynamodb.AttributeType.STRING),
             sort_key=dynamodb.Attribute(name="sk", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="expires",
             removal_policy=RemovalPolicy.DESTROY,
         )
 

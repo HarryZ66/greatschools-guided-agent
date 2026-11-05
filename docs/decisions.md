@@ -450,3 +450,35 @@ Measured on the evals (one run each): output tokens per turn 1,151 → 1,081 (�
 median 355 → 293 characters (−18%), still 38 / 38. Cost per turn didn't move at four decimals:
 with Haiku answering most turns, Sonnet's share (11% of calls, 71% of cost) matters far more
 than reply length, so the sensitive-topic list in `routing.py` is the next cost lever to review.
+
+## 035: Plain searches skip the model, and identical first questions reuse today's answer
+
+GreatSchools' own search already runs as classic filters: grade, place, type. A parent who types
+just that doesn't need an AI model to read it, and many parents ask the same first question.
+
+- **Fast path** (`gs_agent/fastpath.py`). A first message that is only a grade and a place we have
+  schools in (a covered city or a ZIP), optionally with public / charter / private, "free" or
+  "top", runs the search and checks in code. It answers with one sentence and the question the
+  agent asks for a search this plain (prompt rule 4): "What matters most for your child?" with
+  extra help with learning, after-school care, a school bus and counseling support. Any word it
+  doesn't know, a city we don't cover, no results, or a trade-off code spotted sends the message
+  to the model instead. English only; other languages go to the model, which answers in kind.
+  The next turn goes to the model with a recap of the needs and the exchange so far.
+  Measured: about 1 s instead of about 9 s, and no model cost. Trace step `fast_path`.
+- **Shared first-turn cache** (`gs_agent/turn_cache.py`). On AgentCore Runtime each parent's
+  conversation runs in its own microVM, so the cache lives in the app's DynamoDB table
+  (`pk = CACHE#<key>`). The key is a hash of the message (ignoring case and punctuation), the day
+  (UTC) and the models. A hit restores that conversation's state and returns the same checked
+  answer, with this parent's saves; the trace starts with a `cache` step, then the steps that
+  ran for the original answer. Entries expire at midnight UTC (the table's TTL deletes them).
+- **Not cached:** messages on sensitive topics (`routing.sensitive`, so a parent's words about
+  their child's disability or family aren't stored for others), answers that fell back or
+  needed Sonnet's retry, and anything when `TURN_CACHE=off`. The evals turn it off by default
+  (`--cache` turns it on) so they keep measuring the agent. A cache failure never fails a turn.
+- The conversation's state round-trips as JSON (`GuidedSession.snapshot` / `restore`): needs,
+  last results, the open question, chip labels and the model's history without thinking blocks.
+  Decision 036 uses the same snapshot to keep conversations across restarts.
+- Eval checks fixed in this change: "can't sort" now counts as declining a demographic filter
+  (the agent said "I can't sort or choose neighborhoods by how many low-income families live
+  there"), and `subgroup_help_ok` accepts `high_performing` ("which schools do well for kids like
+  him" can fairly mean highly rated).

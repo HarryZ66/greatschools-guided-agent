@@ -21,12 +21,14 @@ from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models import BedrockModel, CacheConfig
 
+from . import fastpath
 from . import gateway_client as G
 from . import knowledge
 from . import needs as N
 from . import programs as P
 from . import routing
 from . import search
+from . import turn_cache
 from .config import REGION
 
 log = logging.getLogger("gs_agent.agent")
@@ -479,7 +481,16 @@ class GuidedSession:
     def _handle(self, event: dict) -> dict:
         kind = event.get("type")
         if kind == "query":
-            return self._agent_turn(event["text"])
+            text = event["text"]
+            first = not self.needs and not self.agent.messages
+            if first and (response := self._fast_turn(text)):
+                return response
+            if first and (cached := turn_cache.get(text)):
+                return self._replay(cached)
+            response = self._agent_turn(text)
+            if first and not response.get("fallback") and not any(st["tool"] == "escalate" for st in self._trace):
+                turn_cache.put(text, {"state": self.snapshot(), "response": response, "steps": list(self._trace)})
+            return response
         if kind == "answer":
             label = event.get("text") or self._option_label(event.get("option_id"))
             question = (self.pending_question or {}).get("text", "")
@@ -501,6 +512,86 @@ class GuidedSession:
         if kind == "new_search":
             return self._new_search()
         raise ValueError(f"Unknown event type: {kind}")
+
+    def _fast_turn(self, text: str) -> dict | None:
+        """A plain grade-and-place search, answered in code without the model (decision 035).
+
+        Returns None to hand the message to the model: when it asks for anything else, when we
+        have no schools there (the model explains where we do), or when code spots a trade-off
+        (the model words that question best).
+        """
+        try:
+            needs = fastpath.parse(text)
+        except Exception:
+            log.exception("fast path parse failed; using the model")
+            return None
+        if not needs:
+            return None
+        started = time.perf_counter()
+        clean = copy.deepcopy(needs)
+        found = search.find(clean, None)
+        if not found["results"] or found["question_hints"]:
+            return None
+        self.needs, self.last, self.semantic_query = clean, found, None
+        self.searched_this_turn = True
+        self.seen_ids.update(r["school_id"] for r in found["results"])
+        self._step("fast_path", "Code (no model)",
+                   "Your search was a plain grade and place, so I ran it without calling the AI model")
+        self._trace_search(clean, started, set())
+        self.chip_labels = {n["need"]: ChipLabel(need=n["need"], label=fastpath.label(n), source="stated",
+                                                 mode=n["mode"], value=n.get("value")) for n in needs}
+        decision = Decision(chips=list(self.chip_labels.values()), message=fastpath.message(needs, found),
+                            question=Question(text=fastpath.QUESTION, why=fastpath.WHY, options=fastpath.OPTIONS))
+        response = self._blocks(decision)
+        # The next turn goes to the model: give it what happened here, like a chip edit does
+        self.agent.messages.append({"role": "user", "content": [{"text": text}]})
+        self.agent.messages.append({"role": "assistant", "content": [
+            {"text": f"{decision.message} {fastpath.QUESTION} (Options: {', '.join(fastpath.OPTIONS)})"}]})
+        self._needs_recap_pending = True
+        return response
+
+    def _replay(self, cached: dict) -> dict:
+        """Answer with another parent's identical first turn from today (decision 035)."""
+        self.restore(cached["state"])
+        self._step("cache", "Amazon DynamoDB",
+                   "Another parent asked exactly this today, so I reused that checked answer without calling "
+                   "the AI model. The steps below ran for that answer")
+        self._trace += cached.get("steps", [])
+        response = copy.deepcopy(cached["response"])
+        response["session_id"] = self.session_id
+        for block in response["blocks"]:
+            if block["type"] == "school_results":
+                for r in block["results"]:
+                    r["saved"] = r["school_id"] in self.saved
+        response.pop("trace", None)
+        return response
+
+    # ---------------------------------------------------------------- saving and restoring
+
+    _STATE = ("needs", "semantic_query", "last", "pending_question", "seen_content", "seen_documents",
+              "last_programs", "unmapped", "suggestions", "_strong", "_needs_recap_pending")
+    _SETS = ("seen_ids", "seen_programs")
+
+    def snapshot(self) -> dict:
+        """The conversation as plain JSON, to restore in another process (decisions 035 and 036).
+
+        Holds the needs, the last results, the open question and the model's history (without
+        thinking, which is bound to the turn that wrote it). Not the parent's identity or saves.
+        """
+        state = {k: getattr(self, k) for k in self._STATE}
+        state.update({k: sorted(getattr(self, k)) for k in self._SETS})
+        state["chip_labels"] = {k: v.model_dump() for k, v in self.chip_labels.items()}
+        state["messages"] = _without_thinking(self.agent.messages)
+        return json.loads(json.dumps(state, default=str))
+
+    def restore(self, state: dict) -> None:
+        for k in self._STATE:
+            if k in state:
+                setattr(self, k, copy.deepcopy(state[k]))
+        for k in self._SETS:
+            setattr(self, k, set(state.get(k, [])))
+        self.chip_labels = {k: ChipLabel(**v) for k, v in state.get("chip_labels", {}).items()}
+        self.agent = self._new_agent(messages=copy.deepcopy(state.get("messages") or []))
 
     def _new_search(self) -> dict:
         """Start over with the same parent: forget the conversation, keep the session and saved list.
@@ -634,11 +725,7 @@ class GuidedSession:
         trims old messages, those blocks no longer match and Bedrock rejects the request.
         The model doesn't need its old thinking, so strip it before every new turn.
         """
-        for message in self.agent.messages:
-            content = message.get("content", [])
-            kept = [block for block in content if "reasoningContent" not in block]
-            if len(kept) != len(content):
-                message["content"] = kept or [{"text": "(thinking)"}]
+        self.agent.messages[:] = _without_thinking(self.agent.messages)
 
     def _needs_for_prompt(self) -> list[dict]:
         return [{k: ({kk: vv for kk, vv in v.items() if not kk.startswith("_")} if isinstance(v, dict) else v)
@@ -778,6 +865,16 @@ class GuidedSession:
                  "saved": r["school_id"] in self.saved}
                 for r in results]})
         return {"session_id": self.session_id, "blocks": blocks}
+
+
+def _without_thinking(messages: list[dict]) -> list[dict]:
+    """The same messages without thinking blocks (an emptied message keeps a placeholder)."""
+    out = []
+    for message in messages:
+        content = message.get("content", [])
+        kept = [block for block in content if "reasoningContent" not in block]
+        out.append({**message, "content": kept or [{"text": "(thinking)"}]} if len(kept) != len(content) else message)
+    return out
 
 
 _NUMBER = re.compile(r"\d+(?:[.:,]\d+)*")

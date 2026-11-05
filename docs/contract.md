@@ -188,7 +188,9 @@ list; it answers "is this an agent or a chatbot?" and shows which AWS service di
 `tool` is one of `understand`, `find_schools`, `verify`, `trade_offs`, `keep_values`,
 `get_school_profile`, `find_school_by_name`, `lookup_content`, `search_programs`, `compare`,
 `ground`, `rerank` (chip edits, no model call), `escalate` (the fast model couldn't finish, so the
-strong model took the turn), `new_search` or `fallback`. The `understand` step's `service` names the
+strong model took the turn), `fast_path` (a plain grade-and-place search answered in code, no model
+call), `cache` (another parent's identical first question from today, reused; the steps after it
+ran for that answer), `new_search` or `fallback`. The `understand` step's `service` names the
 model that answered the turn (decision 033). `ms` is present for steps that call
 a service. Render `service` and `text` as given; new `tool` values may appear later.
 
