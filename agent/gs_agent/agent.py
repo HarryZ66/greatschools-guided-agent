@@ -11,6 +11,7 @@ import logging
 import re
 import time
 import uuid
+from functools import lru_cache
 from typing import Any, Callable, Literal
 
 import boto3
@@ -20,15 +21,15 @@ from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models import BedrockModel, CacheConfig
 
+from . import fastpath
 from . import gateway_client as G
 from . import knowledge
 from . import needs as N
 from . import programs as P
+from . import routing
 from . import search
-from .config import MAIN_MODEL, REGION
-
-MODEL_NAME = {"us.anthropic.claude-sonnet-5-5": "Claude Sonnet 5.5",
-              "us.anthropic.claude-haiku-5-5": "Claude Haiku 5.5"}.get(MAIN_MODEL, MAIN_MODEL)
+from . import turn_cache
+from .config import REGION
 
 log = logging.getLogger("gs_agent.agent")
 
@@ -72,15 +73,11 @@ class ChipLabel(BaseModel):
     value: Any = Field(default=None, description="Value in the catalog's format, if the need has one")
 
 
-class Option(BaseModel):
-    id: str
-    label: str
-
-
 class Question(BaseModel):
     text: str = Field(description="One short question in plain language")
-    why: str = Field(description="Why this question changes the results, citing the counts you saw")
-    options: list[Option] = Field(description="2-4 tappable answers")
+    why: str = Field(description="One short sentence: why the answer changes the results")
+    # Code gives each option its id, so the model only writes the words (decision 035)
+    options: list[str] = Field(description="2-4 short tappable answers")
 
 
 class Callout(BaseModel):
@@ -102,8 +99,8 @@ class Decision(BaseModel):
     suggestions: list[Suggestion] = Field(default_factory=list, description=(
         "0-2 needs the parent didn't mention but likely cares about, given what they said. Empty if none."))
     question: Question | None = Field(default=None, description="At most one question, or null")
-    message: str = Field(description="1-3 plain sentences for the parent. No jargon. Don't restate the cards. "
-                                     "If you ask a question, don't repeat it here.")
+    message: str = Field(description="1-2 short plain sentences for the parent, most important first. No jargon. "
+                                     "Don't restate the cards. If you ask a question, don't repeat it here.")
     callouts: list[Callout] = Field(default_factory=list, description="0-2 honest notes about the data")
     sources: list[str] = Field(default_factory=list,
                                description="ids of guide entries from lookup_content that your message relies on")
@@ -148,7 +145,9 @@ How you work:
    or when a good school leaves a time gap (a question_hint will say so): search near that school
    with time_from/time_to set to the gap. Mention only programs the tool returned, say they're run by
    a library or community center (not the school), and note if registration is needed. Programs with
-   only past sessions are excluded; say so if the parent asks about one.
+   only past sessions are excluded; say so if the parent asks about one. Classes for the parent or the
+   whole family (English classes, computer classes) are programs too: call search_programs with the
+   city right away, without asking for a child's grade.
 7. When the parent asks what a term means, how ratings work, how school choice works, or what the
    app's labels mean, call lookup_content and explain using only what it returns, in plain words,
    and list the entry ids in sources. If it returns nothing, say you don't have a guide entry for
@@ -183,6 +182,9 @@ Fairness rule (fair housing):
   (programs, safety reviews, class size, ratings, support for English learners or special needs).
 - Subgroup ratings (e.g. how a school does for low-income or English-learner students) may be
   shared when a parent asks how well a school serves a group their own child belongs to.
+- A parent describing their own family ("we're low-income", "my son is learning English") is telling
+  you what their child needs, not asking you to sort by who the students are. Just help; don't say
+  what you can't filter by.
 
 Need catalog (id: value format):
 {catalog}
@@ -191,6 +193,15 @@ Need catalog (id: value format):
 
 def _catalog_text() -> str:
     return "\n".join(f"- {k}: value = {v['value']}" for k, v in N.CATALOG.items())
+
+
+@lru_cache(maxsize=8)
+def bedrock_model(model_id: str) -> BedrockModel:
+    """One client per model, shared by every session: it holds settings, not conversation state."""
+    # Claude 5.x models on Bedrock reject `temperature`, so it's left at the default.
+    # Prompt caching: the system prompt, tool specs and earlier turns repeat on every call.
+    return BedrockModel(model_id=model_id, boto_session=boto3.Session(region_name=REGION),
+                        max_tokens=4000, cache_config=CacheConfig(strategy="auto"))
 
 
 # ---------------------------------------------------------------- session
@@ -213,6 +224,8 @@ class GuidedSession:
         self.seen_programs: set[str] = set()
         self.usage = {"inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0, "cacheWriteInputTokens": 0,
                       "model_calls": 0}
+        self.usage_by_model: dict[str, dict[str, int]] = {}  # the same counts per model id, for cost
+        self._strong = False  # this conversation touched a sensitive topic, so it stays on the strong model
         self._usage_agent, self._usage_seen = None, {}
         self.unmapped: list[str] = []
         self.suggestions: list[dict] = []
@@ -277,12 +290,10 @@ class GuidedSession:
                                         "Answer now with what you already have."})
         return None
 
-    def _new_agent(self, messages: list | None = None) -> Agent:
+    def _new_agent(self, messages: list | None = None, model_id: str | None = None) -> Agent:
         return Agent(
-            # Claude 5.x models on Bedrock reject `temperature`, so it's left at the default.
-            # Prompt caching: the system prompt, tool specs and earlier turns repeat on every call.
-            model=BedrockModel(model_id=MAIN_MODEL, boto_session=boto3.Session(region_name=REGION),
-                               max_tokens=4000, cache_config=CacheConfig(strategy="auto")),
+            # The model is set again at the start of each turn (routing.choose)
+            model=bedrock_model(model_id or routing.MAIN_MODEL or routing.FAST_MODEL),
             tools=self._tools(),
             system_prompt=SYSTEM_PROMPT.format(catalog=_catalog_text(), max_tools=MAX_TOOL_CALLS),
             conversation_manager=SlidingWindowConversationManager(window_size=60),
@@ -470,7 +481,16 @@ class GuidedSession:
     def _handle(self, event: dict) -> dict:
         kind = event.get("type")
         if kind == "query":
-            return self._agent_turn(event["text"])
+            text = event["text"]
+            first = not self.needs and not self.agent.messages
+            if first and (response := self._fast_turn(text)):
+                return response
+            if first and (cached := turn_cache.get(text)):
+                return self._replay(cached)
+            response = self._agent_turn(text)
+            if first and not response.get("fallback") and not any(st["tool"] == "escalate" for st in self._trace):
+                turn_cache.put(text, {"state": self.snapshot(), "response": response, "steps": list(self._trace)})
+            return response
         if kind == "answer":
             label = event.get("text") or self._option_label(event.get("option_id"))
             question = (self.pending_question or {}).get("text", "")
@@ -493,6 +513,86 @@ class GuidedSession:
             return self._new_search()
         raise ValueError(f"Unknown event type: {kind}")
 
+    def _fast_turn(self, text: str) -> dict | None:
+        """A plain grade-and-place search, answered in code without the model (decision 036).
+
+        Returns None to hand the message to the model: when it asks for anything else, when we
+        have no schools there (the model explains where we do), or when code spots a trade-off
+        (the model words that question best).
+        """
+        try:
+            needs = fastpath.parse(text)
+        except Exception:
+            log.exception("fast path parse failed; using the model")
+            return None
+        if not needs:
+            return None
+        started = time.perf_counter()
+        clean = copy.deepcopy(needs)
+        found = search.find(clean, None)
+        if not found["results"] or found["question_hints"]:
+            return None
+        self.needs, self.last, self.semantic_query = clean, found, None
+        self.searched_this_turn = True
+        self.seen_ids.update(r["school_id"] for r in found["results"])
+        self._step("fast_path", "Code (no model)",
+                   "Your search was a plain grade and place, so I ran it without calling the AI model")
+        self._trace_search(clean, started, set())
+        self.chip_labels = {n["need"]: ChipLabel(need=n["need"], label=fastpath.label(n), source="stated",
+                                                 mode=n["mode"], value=n.get("value")) for n in needs}
+        decision = Decision(chips=list(self.chip_labels.values()), message=fastpath.message(needs, found),
+                            question=Question(text=fastpath.QUESTION, why=fastpath.WHY, options=fastpath.OPTIONS))
+        response = self._blocks(decision)
+        # The next turn goes to the model: give it what happened here, like a chip edit does
+        self.agent.messages.append({"role": "user", "content": [{"text": text}]})
+        self.agent.messages.append({"role": "assistant", "content": [
+            {"text": f"{decision.message} {fastpath.QUESTION} (Options: {', '.join(fastpath.OPTIONS)})"}]})
+        self._needs_recap_pending = True
+        return response
+
+    def _replay(self, cached: dict) -> dict:
+        """Answer with another parent's identical first turn from today (decision 036)."""
+        self.restore(cached["state"])
+        self._step("cache", "Amazon DynamoDB",
+                   "Another parent asked exactly this today, so I reused that checked answer without calling "
+                   "the AI model. The steps below ran for that answer")
+        self._trace += cached.get("steps", [])
+        response = copy.deepcopy(cached["response"])
+        response["session_id"] = self.session_id
+        for block in response["blocks"]:
+            if block["type"] == "school_results":
+                for r in block["results"]:
+                    r["saved"] = r["school_id"] in self.saved
+        response.pop("trace", None)
+        return response
+
+    # ---------------------------------------------------------------- saving and restoring
+
+    _STATE = ("needs", "semantic_query", "last", "pending_question", "seen_content", "seen_documents",
+              "last_programs", "unmapped", "suggestions", "_strong", "_needs_recap_pending")
+    _SETS = ("seen_ids", "seen_programs")
+
+    def snapshot(self) -> dict:
+        """The conversation as plain JSON, to restore in another process (decisions 036 and 037).
+
+        Holds the needs, the last results, the open question and the model's history (without
+        thinking, which is bound to the turn that wrote it). Not the parent's identity or saves.
+        """
+        state = {k: getattr(self, k) for k in self._STATE}
+        state.update({k: sorted(getattr(self, k)) for k in self._SETS})
+        state["chip_labels"] = {k: v.model_dump() for k, v in self.chip_labels.items()}
+        state["messages"] = _without_thinking(self.agent.messages)
+        return json.loads(json.dumps(state, default=str))
+
+    def restore(self, state: dict) -> None:
+        for k in self._STATE:
+            if k in state:
+                setattr(self, k, copy.deepcopy(state[k]))
+        for k in self._SETS:
+            setattr(self, k, set(state.get(k, [])))
+        self.chip_labels = {k: ChipLabel(**v) for k, v in state.get("chip_labels", {}).items()}
+        self.agent = self._new_agent(messages=copy.deepcopy(state.get("messages") or []))
+
     def _new_search(self) -> dict:
         """Start over with the same parent: forget the conversation, keep the session and saved list.
 
@@ -506,6 +606,7 @@ class GuidedSession:
         self.last_programs, self.programs_fresh = None, False
         self.unmapped, self.suggestions = [], []
         self._needs_recap_pending = False
+        self._strong = False
         self.agent = self._new_agent()
         self._step("new_search", "Code (no model)", "Started a new search; your saved list is kept")
         return {"session_id": self.session_id, "blocks": []}
@@ -513,34 +614,71 @@ class GuidedSession:
     def _agent_turn(self, text: str) -> dict:
         self._drop_old_thinking()
         self._tool_calls, self.searched_this_turn = 0, False
-        calls_before = self.usage["model_calls"]
         if self._needs_recap_pending:
             self._needs_recap_pending = False
             if self.needs:
                 text = f"{self._recap()}\n\n{text}"
+        model_id, reason = routing.choose(text, self._strong)
+        self._strong = self._strong or reason is not None
+        history = copy.deepcopy(self.agent.messages)  # to retry this turn on the strong model
         try:
-            try:
-                result = self.agent(text, structured_output_model=Decision)
-            except ClientError as e:
-                if e.response.get("Error", {}).get("Code") != "ValidationException":
-                    raise
-                # Bedrock rejected the stored history. Start a fresh conversation that keeps
-                # what the parent has told us so far, and try once more.
-                self.agent = self._new_agent()
-                self._tool_calls = 0
-                result = self.agent(f"{self._recap()}\n\n{text}", structured_output_model=Decision)
-            self._add_usage(result.metrics)
-            calls = self.usage["model_calls"] - calls_before
-            self._trace.insert(0, {"tool": "understand", "service": f"{MODEL_NAME} on Amazon Bedrock",
-                                   "text": f"Read your message, chose which tools to call ({calls} model "
-                                           f"call{'s' if calls != 1 else ''}) and wrote the reply"})
-            decision: Decision | None = result.structured_output
-            if decision is None:
-                raise ValueError("model returned no structured output")
+            decision, calls = self._run(text, model_id)
         except Exception:
-            log.exception("agent turn failed for session %s; answering from code", self.session_id)
-            return self._fallback()
+            self._count_failed_attempt(model_id)
+            if model_id == routing.STRONG_MODEL or routing.MAIN_MODEL:
+                log.exception("agent turn failed for session %s; answering from code", self.session_id)
+                return self._fallback()
+            # The fast model couldn't finish (no structured reply, a Bedrock error). Give the same
+            # turn, from the same history, to the strong model before falling back to code.
+            log.warning("fast model failed for session %s; retrying on the strong model", self.session_id,
+                        exc_info=True)
+            strong = routing.STRONG_MODEL
+            self._step("escalate", f"{routing.name(strong)} on Amazon Bedrock",
+                       f"{routing.name(model_id)} couldn't finish this turn, so {routing.name(strong)} took it over")
+            model_id, reason = strong, "retry"
+            self.agent = self._new_agent(messages=history, model_id=model_id)
+            self._tool_calls = 0
+            try:
+                decision, calls = self._run(text, model_id)
+            except Exception:
+                self._count_failed_attempt(model_id)
+                log.exception("agent turn failed for session %s; answering from code", self.session_id)
+                return self._fallback()
+        why = {"sensitive topic": " I used the stronger model because this touches a sensitive topic.",
+               "earlier in this conversation": " I kept the stronger model from earlier in this conversation."}
+        self._trace.insert(0, {"tool": "understand", "service": f"{routing.name(model_id)} on Amazon Bedrock",
+                               "text": f"Read your message, chose which tools to call ({calls} model "
+                                       f"call{'s' if calls != 1 else ''}) and wrote the reply." + why.get(reason, "")})
         return self._blocks(decision)
+
+    def _run(self, text: str, model_id: str) -> tuple["Decision", int]:
+        """One model turn on `model_id`: tools, then the structured reply. Returns it and the call count."""
+        self.agent.model = bedrock_model(model_id)
+        calls_before = self.usage["model_calls"]
+        try:
+            result = self.agent(text, structured_output_model=Decision)
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") != "ValidationException":
+                raise
+            # Bedrock rejected the stored history. Start a fresh conversation that keeps
+            # what the parent has told us so far, and try once more.
+            self.agent = self._new_agent(model_id=model_id)
+            self._tool_calls = 0
+            result = self.agent(f"{self._recap()}\n\n{text}", structured_output_model=Decision)
+        self._add_usage(result.metrics, model_id)
+        decision: Decision | None = result.structured_output
+        if decision is None:
+            raise ValueError("model returned no structured output")
+        return decision, self.usage["model_calls"] - calls_before
+
+    def _count_failed_attempt(self, model_id: str) -> None:
+        """A failed attempt still used tokens; count what the agent recorded, if anything."""
+        metrics = getattr(self.agent, "event_loop_metrics", None)
+        if metrics is not None:
+            try:
+                self._add_usage(metrics, model_id)
+            except Exception:
+                log.debug("no usage recorded for the failed attempt", exc_info=True)
 
     def _recap(self) -> str:
         return (f"(Context from earlier in this conversation: the parent's current needs are "
@@ -568,13 +706,16 @@ class GuidedSession:
         self._step("fallback", "Code (no model)", "The model didn't finish, so the cards come straight from the data")
         return response
 
-    def _add_usage(self, metrics) -> None:
+    def _add_usage(self, metrics, model_id: str) -> None:
         """Strands' counters are running totals for the agent, so add only what this turn used."""
         now = {**metrics.accumulated_usage, "model_calls": metrics.cycle_count}
         if self.agent is not self._usage_agent:  # a fresh agent after a fallback starts from zero
             self._usage_agent, self._usage_seen = self.agent, {}
+        per_model = self.usage_by_model.setdefault(model_id, dict.fromkeys(self.usage, 0))
         for key in self.usage:
-            self.usage[key] += now.get(key, 0) - self._usage_seen.get(key, 0)
+            delta = now.get(key, 0) - self._usage_seen.get(key, 0)
+            self.usage[key] += delta
+            per_model[key] += delta
         self._usage_seen = now
 
     def _drop_old_thinking(self) -> None:
@@ -584,11 +725,7 @@ class GuidedSession:
         trims old messages, those blocks no longer match and Bedrock rejects the request.
         The model doesn't need its old thinking, so strip it before every new turn.
         """
-        for message in self.agent.messages:
-            content = message.get("content", [])
-            kept = [block for block in content if "reasoningContent" not in block]
-            if len(kept) != len(content):
-                message["content"] = kept or [{"text": "(thinking)"}]
+        self.agent.messages[:] = _without_thinking(self.agent.messages)
 
     def _needs_for_prompt(self) -> list[dict]:
         return [{k: ({kk: vv for kk, vv in v.items() if not kk.startswith("_")} if isinstance(v, dict) else v)
@@ -679,7 +816,8 @@ class GuidedSession:
         if decision and decision.question:
             q = decision.question
             self.pending_question = {"question_id": "q-" + uuid.uuid4().hex[:6], "text": q.text, "why": q.why,
-                                     "options": [{"id": o.id, "label": plain_label(o.label)} for o in q.options],
+                                     "options": [{"id": f"o{i + 1}", "label": plain_label(label)}
+                                                 for i, label in enumerate(q.options)],
                                      "allow_text": True}
             blocks.append({"type": "clarifying_question", **self.pending_question})
 
@@ -723,10 +861,20 @@ class GuidedSession:
         if results:
             blocks.append({"type": "school_results", "results": [
                 {**{k: r.get(k) for k in ("school_id", "name", "entity_type", "city", "rank", "score", "criteria",
-                                           "watch_out", "quality_flags", "cost")},
+                                           "watch_out", "quality_flags", "cost", "badge")},
                  "saved": r["school_id"] in self.saved}
                 for r in results]})
         return {"session_id": self.session_id, "blocks": blocks}
+
+
+def _without_thinking(messages: list[dict]) -> list[dict]:
+    """The same messages without thinking blocks (an emptied message keeps a placeholder)."""
+    out = []
+    for message in messages:
+        content = message.get("content", [])
+        kept = [block for block in content if "reasoningContent" not in block]
+        out.append({**message, "content": kept or [{"text": "(thinking)"}]} if len(kept) != len(content) else message)
+    return out
 
 
 _NUMBER = re.compile(r"\d+(?:[.:,]\d+)*")
@@ -781,5 +929,6 @@ def _compact(found: dict) -> dict:
                          for c in r["criteria"]},
             "data_quality": [f["note"] for f in r["quality_flags"]],
             "cost": r.get("cost"),
+            "badge": (r.get("badge") or {}).get("label"),
         } for r in found["results"]],
     }

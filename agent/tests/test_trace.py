@@ -57,9 +57,10 @@ def test_failed_turn_trace_says_cards_come_from_code(monkeypatch):
         def __call__(self, *a, **k):
             raise RuntimeError("model down")
     s.agent = BrokenAgent()
-    s._new_agent = lambda messages=None: BrokenAgent()
+    s._new_agent = lambda **k: BrokenAgent()
     out = s.handle({"type": "query", "text": "Middle school near Miami"})
-    assert out["fallback"] is True and tools(out["trace"]["steps"]) == ["fallback"]
+    # The fast model failed, the strong model got the turn and failed too, then code answered
+    assert out["fallback"] is True and tools(out["trace"]["steps"]) == ["escalate", "fallback"]
 
 
 def test_trace_counts_dropped_notes():

@@ -57,6 +57,17 @@ class RuntimeCallError(Exception):
         self.status, self.detail = status, detail
 
 
+class RuntimeUnreachable(RuntimeCallError):
+    """The runtime couldn't be reached or didn't answer (network, auth, throttling, 5xx).
+
+    Unlike an error the runtime returns on purpose (an unknown school, a bad request), the API
+    can recover from this by running the call on Fargate (api.py, decision 038).
+    """
+
+    def __init__(self):
+        super().__init__(502, UNREACHABLE)
+
+
 def enabled() -> bool:
     return bool(AGENT_RUNTIME_ARN)
 
@@ -87,7 +98,7 @@ def access_token() -> str:
                                    "Content-Type": "application/x-www-form-urlencoded"})
         if r.status != 200:
             log.error("token request failed: %s %s", r.status, r.data[:200])
-            raise RuntimeCallError(502, UNREACHABLE)
+            raise RuntimeUnreachable()
         data = json.loads(r.data)
         _token.update(value=data["access_token"], expires=time.time() + int(data.get("expires_in", 3600)))
         return _token["value"]
@@ -112,13 +123,13 @@ def _invoke(op: str, session_id: str, body: dict, accept: str):
                                        SESSION_HEADER: runtime_session_id(session_id)})
         except urllib3.exceptions.HTTPError:
             log.exception("AgentCore Runtime call failed (%s, session %s)", op, session_id)
-            raise RuntimeCallError(502, UNREACHABLE)
+            raise RuntimeUnreachable()
         if r.status != 200:
             log.error("AgentCore Runtime answered %s (%s, session %s): %s",
                       r.status, op, session_id, r.read(300))
             if r.status in (401, 403):  # let the next call fetch a fresh token
                 _token["value"] = None
-            raise RuntimeCallError(502, UNREACHABLE)
+            raise RuntimeUnreachable()
         return r
     try:
         return _bedrock_agentcore().invoke_agent_runtime(
@@ -130,7 +141,7 @@ def _invoke(op: str, session_id: str, body: dict, accept: str):
         )["response"]
     except (ClientError, BotoCoreError):
         log.exception("AgentCore Runtime call failed (%s, session %s)", op, session_id)
-        raise RuntimeCallError(502, UNREACHABLE)
+        raise RuntimeUnreachable()
 
 
 def invoke(op: str, session_id: str, body: dict) -> dict:

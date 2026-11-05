@@ -25,7 +25,7 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | Area | Our choice |
 |---|---|
 | Language | Python for the agent, API, data scripts and infrastructure; React for the parent app |
-| Model | Claude Sonnet 5.5 on Bedrock for the agent, with prompt caching; Titan Text Embeddings v2 for semantic search. Haiku 5.5 was evaluated as a cheaper option (see Evaluation) |
+| Model | Claude Haiku 5.5 on Bedrock for most turns; code sends turns on sensitive topics, and any turn Haiku can't finish, to Claude Sonnet 5.5 (decision 034). Prompt caching on both. Titan Text Embeddings v2 for semantic search |
 | How agentic | A guided agent. The model picks its tools (school search, school profile, find by name, parent guide, programs), asks at most one question per turn, spots gaps and suggests needs. Code decides every status, score, trade-off and piece of evidence. At most 6 tool calls per turn |
 | Agent framework | Strands Agents |
 | Compute | The agent runs on Amazon Bedrock AgentCore Runtime, one session per conversation (decision 025). The public API is one ARM64 Fargate task behind an ALB, reached only through CloudFront and AWS WAF |
@@ -42,6 +42,7 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | Amazon DynamoDB | Session state, saved schools and thumbs up/down feedback |
 | Amazon S3 | Data files and the frontend site |
 | Amazon Bedrock AgentCore Runtime | Runs the agent: each parent's conversation in its own warm session |
+| Amazon Bedrock AgentCore Memory | Short-term memory: each conversation's state after every turn, so a new session picks it up after an idle timeout or a deploy (decision 037) |
 | Amazon ECS on AWS Fargate (ARM64) | Runs the public API, which passes agent turns to AgentCore Runtime |
 | Elastic Load Balancing (ALB) | Routes traffic to the agent task |
 | Amazon CloudFront | One HTTPS URL: `/api/*` goes to the agent, everything else to the frontend |
@@ -157,7 +158,16 @@ extraction, questions, refusals, and that every school the agent names was retur
 AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 .venv/bin/python evals/run_evals.py
 ```
 
-Latest run on Claude Sonnet 5.5 (full table in [`evals/results/latest.md`](evals/results/latest.md)):
+Latest run, Haiku 5.5 with Sonnet 5.5 for sensitive and failed turns (decision 034; full table in
+[`evals/results/latest.md`](evals/results/latest.md)):
+
+| Metric | Result |
+|---|---|
+| Cases passed | 38 / 38 (one run) |
+| Model calls on Sonnet 5.5 | 11% (the eval set is heavy on fairness and special-needs cases) |
+| Estimated cost per turn | ~$0.0033, vs ~$0.017 with Sonnet 5.5 on every turn (list prices: Haiku 5.5 $0.10 / $0.50, Sonnet 5.5 $2 / $10 per million input / output tokens; cache reads 10%, writes 125% of input) |
+
+The earlier all-Sonnet run, for comparison:
 
 | Metric | Result |
 |---|---|
@@ -183,7 +193,7 @@ Load test against the deployed URL: 8 parents searching at the same moment all g
 Other tests:
 
 ```bash
-cd agent && ../.venv/bin/pytest -q tests                  # 107 offline tests, including AgentCore, Gateway, school fit and program matching
+cd agent && ../.venv/bin/pytest -q tests                  # 157 offline tests, including AgentCore, Gateway, Memory, model routing, the fast path, the cache and the Fargate fallback
 python3 evals/smoke_api.py https://<cloudfront-domain>    # 26 end-to-end API checks against a deployment, including streaming
 python3 agent/scripts/check_front_door.py                # the agent runtime rejects calls without an OAuth token
 python3 agent/scripts/gateway_tools_demo.py              # lists the Gateway's MCP tools and calls one

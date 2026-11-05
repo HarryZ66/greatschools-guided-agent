@@ -2,6 +2,7 @@
 
 Single table (see infra/stacks/data_stack.py):
     pk = SESSION#<id>   sk = SAVED#<school_id> | FEEDBACK#TURN#<n> or FEEDBACK#<school_id> | SEARCH#<iso time>
+    pk = CACHE#<key>    sk = TURN (a cached first-turn answer, with `expires`)
 """
 
 import json
@@ -93,3 +94,18 @@ def metrics() -> dict:
         "relevance": round(up / (up + down), 3) if up + down else None,
         "criteria_per_search": round(criteria / searches, 2) if searches else None,
     }
+
+
+# ---------------------------------------------------------------- first-turn answer cache (decision 036)
+# pk = CACHE#<sha256 of the normalized message, day and models>, sk = TURN. `expires` is epoch
+# seconds: reads ignore expired items, and the table's TTL deletes them.
+
+def cache_get(key: str) -> str | None:
+    item = _table().get_item(Key={"pk": f"CACHE#{key}", "sk": "TURN"}).get("Item")
+    if not item or int(item.get("expires", 0)) <= int(datetime.now(timezone.utc).timestamp()):
+        return None
+    return item["data"]
+
+
+def cache_put(key: str, data: str, expires: int) -> None:
+    _table().put_item(Item={"pk": f"CACHE#{key}", "sk": "TURN", "data": data, "expires": expires})

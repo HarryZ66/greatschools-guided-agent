@@ -34,11 +34,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent"))
 
-# Assumed on-demand prices (USD per million tokens), for estimates only. Update with real Bedrock prices.
-# Cache reads are assumed at 10% of the input price and cache writes at 125%, Anthropic's usual ratios.
-PRICES = {"sonnet": (3.0, 15.0), "haiku": (1.0, 5.0)}
+# Prices (USD per million tokens, input and output): Anthropic's list prices for Claude Sonnet 5.5 and
+# Haiku 5.5. Bedrock's may differ a little. Cache reads are 10% of the input price, writes 125%.
+PRICES = {"sonnet": (2.0, 10.0), "haiku": (0.10, 0.50)}
 CACHE_READ, CACHE_WRITE = 0.10, 1.25
-REFUSAL_MARKERS = ["fair housing", "can't filter", "can't search or rank", "can't suggest or rank", "can't rank",
+REFUSAL_MARKERS = ["fair housing", "can't filter", "can't search or rank", "can't suggest or rank", "can't rank", "can't sort",
                    "can't pick", "won't filter", "won't rank", "by the race", "by race", "by how much income",
                    "by how much money", "by income"]
 NEGATIONS = ("can't", "cannot", "won't", "not", "don't", "never")
@@ -61,7 +61,7 @@ def school_cores() -> dict[str, list[str]]:
     for path in [ROOT / "data/generated/schools_generated.json", ROOT / "data/raw/schools_sample.json"]:
         if not path.exists():
             continue
-        for s in json.loads(path.read_text()):
+        for s in json.loads(path.read_text(encoding="utf-8")):
             core = " ".join(w for w in s["name"].split() if w.lower() not in GENERIC)
             if len(core) >= 5:
                 cores.setdefault(core.lower(), []).append(s["id"].removeprefix("School "))
@@ -163,6 +163,7 @@ def run_case(case: dict, cores: dict) -> dict:
     return {
         "id": case["id"], "category": case["category"], "passed": all(checks.values()), "checks": checks,
         "elapsed_s": round(elapsed, 1), "turns": len(case["turns"]), "usage": session.usage,
+        "usage_by_model": session.usage_by_model,
         "needs": got, "extra_needs": extra, "made_up": made_up, "error": error, "text": text,
     }
 
@@ -172,34 +173,49 @@ def main() -> None:
     parser.add_argument("--model", help="Bedrock model id to use instead of the default")
     parser.add_argument("--only", help="comma-separated case ids")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--cache", action="store_true",
+                        help="allow the shared first-turn cache (off by default, so evals measure the agent)")
     args = parser.parse_args()
+    if not args.cache:
+        os.environ["TURN_CACHE"] = "off"
     if args.model:
         os.environ["MAIN_MODEL"] = args.model
-    from gs_agent.config import MAIN_MODEL
+    from gs_agent.config import FAST_MODEL, MAIN_MODEL, STRONG_MODEL
+    label = MAIN_MODEL or f"tiered ({FAST_MODEL} + {STRONG_MODEL})"
 
-    cases = json.loads((ROOT / "evals/cases.json").read_text())
+    cases = json.loads((ROOT / "evals/cases.json").read_text(encoding="utf-8"))
     if args.only:
         cases = [c for c in cases if c["id"] in args.only.split(",")]
     cores = school_cores()
 
-    print(f"Running {len(cases)} cases on {MAIN_MODEL} with {args.workers} workers…", file=sys.stderr)
+    print(f"Running {len(cases)} cases on {label} with {args.workers} workers…", file=sys.stderr)
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         results = list(pool.map(lambda c: run_case(c, cores), cases))
 
-    price_in, price_out = PRICES["haiku" if "haiku" in MAIN_MODEL else "sonnet"]
+    def price(model_id: str) -> tuple[float, float]:
+        return PRICES["haiku" if "haiku" in model_id else "sonnet"]
+
     total_turns = sum(r["turns"] for r in results)
     tokens_in = sum(r["usage"]["inputTokens"] for r in results)
     tokens_out = sum(r["usage"]["outputTokens"] for r in results)
     cache_read = sum(r["usage"].get("cacheReadInputTokens", 0) for r in results)
     cache_write = sum(r["usage"].get("cacheWriteInputTokens", 0) for r in results)
-    cost = (tokens_in * price_in + cache_read * price_in * CACHE_READ + cache_write * price_in * CACHE_WRITE
-            + tokens_out * price_out) / 1e6
-    # Same tokens priced as if nothing were cached, to show what caching saves
-    cost_uncached = ((tokens_in + cache_read + cache_write) * price_in + tokens_out * price_out) / 1e6
+    # Each model's tokens at that model's price; also as if nothing were cached, to show what caching saves
+    cost = cost_uncached = 0.0
+    calls_by_model: dict[str, int] = {}
+    for r in results:
+        for model_id, u in r.get("usage_by_model", {}).items():
+            p_in, p_out = price(model_id)
+            cost += (u["inputTokens"] * p_in + u["cacheReadInputTokens"] * p_in * CACHE_READ
+                     + u["cacheWriteInputTokens"] * p_in * CACHE_WRITE + u["outputTokens"] * p_out) / 1e6
+            cost_uncached += ((u["inputTokens"] + u["cacheReadInputTokens"] + u["cacheWriteInputTokens"]) * p_in
+                              + u["outputTokens"] * p_out) / 1e6
+            calls_by_model[model_id] = calls_by_model.get(model_id, 0) + u["model_calls"]
+    all_calls = sum(calls_by_model.values())
     per_turn = [r["elapsed_s"] / r["turns"] for r in results if not r["error"]]
     with_needs = [r for r in results if "needs_recall" in r["checks"]]
     summary = {
-        "model": MAIN_MODEL,
+        "model": label,
         "date": datetime.now().isoformat(timespec="minutes"),
         "cases": len(results),
         "passed": sum(r["passed"] for r in results),
@@ -212,15 +228,18 @@ def main() -> None:
         "cached_share_of_input": round(cache_read / (tokens_in + cache_read + cache_write), 2) if cache_read else 0,
         "est_cost_per_turn_usd": round(cost / total_turns, 4) if total_turns else None,
         "est_cost_per_turn_without_cache_usd": round(cost_uncached / total_turns, 4) if total_turns else None,
-        "price_assumption_per_million": {"input": price_in, "output": price_out},
+        "strong_model_share_of_calls": round(calls_by_model.get(STRONG_MODEL, 0) / all_calls, 2) if all_calls else None,
+        "prices_per_million": {m: {"input": price(m)[0], "output": price(m)[1]} for m in sorted(calls_by_model)},
     }
 
     out_dir = ROOT / "evals/results"
     out_dir.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
-    (out_dir / f"{stamp}-{MAIN_MODEL.split('.')[-1]}.json").write_text(json.dumps({"summary": summary, "results": results}, indent=1))
+    name = MAIN_MODEL.split(".")[-1] if MAIN_MODEL else "tiered"
+    (out_dir / f"{stamp}-{name}.json").write_text(json.dumps({"summary": summary, "results": results}, indent=1),
+                                                    encoding="utf-8")
 
-    lines = [f"# Eval results: {MAIN_MODEL}", "", f"Run {summary['date']}.", "",
+    lines = [f"# Eval results: {label}", "", f"Run {summary['date']}.", "",
              "| Metric | Value |", "|---|---|"]
     lines += [f"| {k.replace('_', ' ')} | {v} |" for k, v in summary.items() if k not in ("model", "date")]
     lines += ["", "| Case | Category | Result | Failed checks | Time | Notes |", "|---|---|---|---|---|---|"]
@@ -230,7 +249,7 @@ def main() -> None:
         if r["made_up"]:
             note += f" made-up: {', '.join(r['made_up'])}"
         lines.append(f"| {r['id']} | {r['category']} | {'✅' if r['passed'] else '❌'} | {failed} | {r['elapsed_s']}s | {note} |")
-    (out_dir / "latest.md").write_text("\n".join(lines) + "\n")
+    (out_dir / "latest.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print("\n".join(lines))
 

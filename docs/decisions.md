@@ -372,3 +372,171 @@ sessions. Suggestions do not turn uncertain school information into confirmed fi
 search fails, the profile still returns its checks and marks the lookup unavailable. A parent
 without active search needs is prompted to describe them. Opening a card does not save it or
 call the conversational model.
+
+## 032: Cards show one "Best for ..." badge instead of a rank and a percent fit
+
+The team found that a rank number and "82% fit" don't help parents choose: an exact percent
+suggests a precision that doesn't matter to them, and a rank built from every preference hides
+what each school is good at. The cards now drop the rank and the percent, and move the per-need checklist to the
+details panel. This replaces the "3 of 4 confirmed" line from decision 030 on the card; the
+data-problem penalty from 030 still applies to the order. Each card can carry one badge that says what the school stands out for.
+
+- **Code decides the badge** (decision 002), in `gs_agent/badges.py`, from the same verify rules
+  as the statuses. A school earns "Best for X" only when its status for X is `confirmed` and it is
+  the single strongest of the schools shown on a value in the data: latest care pickup, fewest
+  students per teacher, most counseling staff listed, highest rating, and so on. A tie gives
+  nobody the badge, so a card never says "best" when it isn't. Safety needs more good recent
+  reviews than bad ones: mixed reviews can be `confirmed` (no concerns) but not "best".
+- **One per school, one school per need.** The parent's needs go first (must-haves, then
+  nice-to-haves, in their order). Then extra needs they didn't ask about, so a school can stand
+  out for counseling or the arts. The extras never include `special_ed` or `ell_support`: a
+  "best for" label on a need tied to a child's disability or language, unasked, is steering we
+  don't do (decision 007). Those badges appear only when the parent asked for that need.
+- **No claim without evidence.** `why` names the value ("care until 6:30pm"), shown in the
+  details panel and as the badge's tooltip.
+- `rank` and `score` stay in the API: they still order the cards and pick the trade-off questions.
+- "Good to know" now uses the plain-words evidence ("Class size: large"), not raw field names.
+- Not done: a "culture" badge. Culture isn't in the needs catalog; it could become a need built
+  on the "Belonging / Inclusion" and "Teachers / Staff" review topics.
+
+## 033: Chat replies show one sentence, with "View more" for the rest
+
+Replies had grown long: too much to read for a parent, or in a demo. Each agent reply now shows its
+first sentence by default. What stays visible:
+
+- the first sentence of the reply's text,
+- the agent's question and its answer buttons (they are how the agent guides the parent),
+- the "Open the comparison table" link and program cards,
+- "How I checked this" (still collapsed, as before).
+
+"View more" opens the rest of the text, the "I checked this for you" data notes
+(`evidence_callout`), the reason for the question (`why`) and the guide sources.
+
+- **Honesty stays visible.** A collapsed reply with data notes shows "⚠️ 1 data note" (or "2 data
+  notes"), which opens the reply. Flagging old or missing data is what sets this agent apart, so
+  the hint is never hidden.
+- **Frontend only.** `firstSentence()` in `App.jsx` splits the text in code. The prompt, the API
+  and the evals don't change. The splitter skips abbreviations ("St.", "e.g.") and decimals
+  ("4.5 miles"), and joins a very short opener ("Got it.") to the next sentence.
+- Known gap: a data problem that the model writes into the text itself, not as a callout, is
+  behind "View more" and gets no hint. If that turns out to be common, the fix is in the prompt
+  (put such facts in a callout), not here.
+
+## 034: Most turns run on Claude Haiku 5.5; code sends sensitive and failed turns to Sonnet 5.5
+
+At GreatSchools' scale (about 40M families a year), the model is almost the whole cost of the
+agent; compute and search are about 1% of it. Sonnet 5.5 on every turn would cost hundreds of
+thousands of dollars a year if 1 in 5 families used guided search. Haiku 5.5 costs about a
+twentieth as much per token, and passed 34 of 36 evals on its own.
+
+- **Code picks the model, before any model reads the turn** (`gs_agent/routing.py`). Haiku 5.5 by
+  default. Sonnet 5.5 when the parent's words touch race or ethnicity, national origin, religion,
+  income or a child's disability (an English and Spanish word list). Matching too much costs a
+  few cents; missing one risks a hurtful reply. A conversation that touched one of these stays
+  on Sonnet until "New search", so its follow-up turns keep that care.
+- **A failed Haiku turn is retried on Sonnet** from the same history before the code fallback
+  (contract section 5). The trace shows it as an `escalate` step.
+- **Both models get the same prompt, tools and checks.** Statuses, evidence, badges and grounding
+  stay in code (decision 002), so a cheaper model can't make the cards wrong.
+- **Prompt fixes from the Haiku run, for both models:** classes for the parent or family are
+  programs (search them without asking for a grade), and a parent describing their own family
+  ("we're low-income") gets help, not a line about what we can't filter by. Sonnet also added
+  that line now and then.
+- Thinking effort stays at each model's default: the team chose not to trade reasoning for cost.
+- The prompt cache is per model, so a switch mid-conversation starts that turn with a cold cache.
+  Keeping sensitive conversations on Sonnet avoids switching back and forth.
+- `FAST_MODEL` and `STRONG_MODEL` set the tiers. `MAIN_MODEL` pins every turn to one model; the
+  evals use it to compare models (`run_evals.py --model ...`). Eval costs now price each model's
+  tokens at its own list price ($0.10 / $0.50 and $2 / $10 per million input / output tokens).
+
+## 035: The model writes less: shorter messages, one-line reasons, option words only
+
+Output tokens cost 5× input tokens, and most of what the model writes is structured data, not the
+reply a parent reads. Thinking stays at each model's default (the team chose not to cut reasoning),
+so this trims only the structured reply:
+
+- The message is 1–2 short sentences, most important first (was 1–3). It pairs with "View more"
+  (decision 033): the first sentence is what parents see.
+- The question's `why` is one short sentence. It sits behind "View more".
+- The model writes answer options as plain words; code numbers them (`o1`, `o2`, ...). The API
+  still returns `{"id", "label"}` options.
+- Chip labels stay with the model: code-written labels would be English only, and the agent
+  answers in the parent's language.
+
+Measured on the evals (one run each): output tokens per turn 1,151 → 1,081 (−6%), reply text
+median 355 → 293 characters (−18%), still 38 / 38. Cost per turn didn't move at four decimals:
+with Haiku answering most turns, Sonnet's share (11% of calls, 71% of cost) matters far more
+than reply length, so the sensitive-topic list in `routing.py` is the next cost lever to review.
+
+## 036: Plain searches skip the model, and identical first questions reuse today's answer
+
+GreatSchools' own search already runs as classic filters: grade, place, type. A parent who types
+just that doesn't need an AI model to read it, and many parents ask the same first question.
+
+- **Fast path** (`gs_agent/fastpath.py`). A first message that is only a grade and a place we have
+  schools in (a covered city or a ZIP), optionally with public / charter / private, "free" or
+  "top", runs the search and checks in code. It answers with one sentence and the question the
+  agent asks for a search this plain (prompt rule 4): "What matters most for your child?" with
+  extra help with learning, after-school care, a school bus and counseling support. Any word it
+  doesn't know, a city we don't cover, no results, or a trade-off code spotted sends the message
+  to the model instead. English only; other languages go to the model, which answers in kind.
+  The next turn goes to the model with a recap of the needs and the exchange so far.
+  Measured: about 1 s instead of about 9 s, and no model cost. Trace step `fast_path`.
+- **Shared first-turn cache** (`gs_agent/turn_cache.py`). On AgentCore Runtime each parent's
+  conversation runs in its own microVM, so the cache lives in the app's DynamoDB table
+  (`pk = CACHE#<key>`). The key is a hash of the message (ignoring case and punctuation), the day
+  (UTC) and the models. A hit restores that conversation's state and returns the same checked
+  answer, with this parent's saves; the trace starts with a `cache` step, then the steps that
+  ran for the original answer. Entries expire at midnight UTC (the table's TTL deletes them).
+- **Not cached:** messages on sensitive topics (`routing.sensitive`, so a parent's words about
+  their child's disability or family aren't stored for others), answers that fell back or
+  needed Sonnet's retry, and anything when `TURN_CACHE=off`. The evals turn it off by default
+  (`--cache` turns it on) so they keep measuring the agent. A cache failure never fails a turn.
+- The conversation's state round-trips as JSON (`GuidedSession.snapshot` / `restore`): needs,
+  last results, the open question, chip labels and the model's history without thinking blocks.
+  Decision 037 uses the same snapshot to keep conversations across restarts.
+- Eval checks fixed in this change: "can't sort" now counts as declining a demographic filter
+  (the agent said "I can't sort or choose neighborhoods by how many low-income families live
+  there"), and `subgroup_help_ok` accepts `high_performing` ("which schools do well for kids like
+  him" can fairly mean highly rated).
+
+## 037: Conversations outlive their microVM, in AgentCore Memory
+
+Each parent's conversation runs in its own AgentCore Runtime microVM, which ends after 30 idle
+minutes, 8 hours, or any deploy. Until now that dropped the conversation: the parent's saved list
+survived (DynamoDB, decision 029), but their needs, results and the agent's open question didn't.
+At GreatSchools' traffic, with deploys during the school-choice season, that would happen to
+real parents mid-search.
+
+- After every turn the API saves the conversation's state (`GuidedSession.snapshot`, decision
+  035) as one short-term event in AgentCore Memory (`gs_agent/memory.py`), zlib-compressed.
+  `actorId` is the parent (`parent-<session id>`, standing in for a signed-in user) and
+  `sessionId` is the conversation.
+- A turn for a conversation the process doesn't have loads the newest event and carries on. The
+  trace starts with a `memory` step ("Picked up our conversation where we left off").
+- **Short-term only.** The memory has no extraction strategies: it summarizes nothing and keeps
+  nothing beyond the conversation. Events expire after 7 days, the shortest setting. Long-term
+  memory for returning parents would be opt-in, keep only grade, area, schedule and saved
+  schools, and never a child's disability or language needs (decision 007, no student data).
+- Not summarization: conversations are short, and the state that matters is structured and kept
+  by code. Summaries would add model calls and break the prompt cache.
+- A Memory failure never fails a turn: the parent starts a fresh conversation, list intact.
+  `MEMORY_ID` unset (local runs, tests) turns it off; so does `SESSION_MEMORY=off`.
+- Cost: one event per turn. At list prices that's well under a cent per hundred turns, small
+  next to the model.
+
+## 038: If AgentCore Runtime is down, Fargate runs the turn
+
+Every agent turn, save and profile call goes through AgentCore Runtime (decision 025) behind OAuth
+(026). One failure there (a token, throttling, a cold start that times out) used to show the parent
+"Our assistant is not reachable" with no way forward. The Fargate API has the same code and the same
+permissions, so when the runtime can't be reached it now runs the call itself, and the trace's first
+step says so ("AgentCore Runtime didn't answer, so this turn ran on our Fargate service instead").
+After a failure it skips the runtime for 2 minutes, so later parents don't each wait for the same
+timeout. Errors the runtime returns on purpose (an unknown school, a bad request) still go to the
+parent. A turn that falls back picks up the conversation from AgentCore Memory (decision 037),
+since the Fargate task has the same memory id and permissions; without Memory it starts fresh,
+and the saved list stays either way, because it lives in DynamoDB. Known gap: if the runtime comes
+back while its microVM still holds the conversation, that copy doesn't include the turns Fargate
+ran in between. A streamed turn falls back only if the runtime fails before sending
+anything; once progress has reached the parent, a failure is reported as an error.

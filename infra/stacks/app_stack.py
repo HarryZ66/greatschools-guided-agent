@@ -172,6 +172,14 @@ class AppStack(Stack):
                 "Principal": {"AWS": runtime_role.role_arn},
                 "Action": "bedrock-agentcore:InvokeGateway", "Resource": gateway.attr_gateway_arn}]}))
 
+        # AgentCore Memory, short-term only (decision 037): after every turn the agent saves the
+        # conversation's state as an event, so a new microVM (idle timeout, deploy) picks it up.
+        # No extraction strategies: nothing is summarized or kept beyond the conversation, and
+        # events expire after 7 days, the shortest setting.
+        memory = agentcore.CfnMemory(
+            self, "ConversationMemory", name="greatschools_conversations", event_expiry_duration=7,
+            description="Short-term state of each parent's conversation with the guided agent")
+
         runtime = agentcore.CfnRuntime(
             self, "AgentRuntime",
             agent_runtime_name="greatschools_guided_agent",
@@ -198,6 +206,7 @@ class AppStack(Stack):
                 "AWS_DEFAULT_REGION": self.region,
                 "SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}",
                 "TABLE_NAME": table.table_name,
+                "MEMORY_ID": memory.attr_memory_id,
                 **kb_env,
             },
         )
@@ -273,6 +282,7 @@ class AppStack(Stack):
                     "AWS_DEFAULT_REGION": self.region,
                     "SEARCH_ENDPOINT": f"https://{domain.domain_endpoint}",
                     "TABLE_NAME": table.table_name,
+                    "MEMORY_ID": memory.attr_memory_id,
                     "AGENT_RUNTIME_ARN": runtime.attr_agent_runtime_arn,
                     "OAUTH_TOKEN_URL": f"{token_domain.base_url()}/oauth2/token",
                     "OAUTH_CLIENT_ID": api_client.user_pool_client_id,
@@ -294,6 +304,9 @@ class AppStack(Stack):
         for role in (task_role, runtime_role):
             domain.grant_read_write(role)
             table.grant_read_write_data(role)
+            role.add_to_principal_policy(iam.PolicyStatement(
+                actions=["bedrock-agentcore:CreateEvent", "bedrock-agentcore:ListEvents", "bedrock-agentcore:GetEvent"],
+                resources=[memory.attr_memory_arn]))
             role.add_to_principal_policy(iam.PolicyStatement(
                 actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
                 resources=[
