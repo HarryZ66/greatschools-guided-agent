@@ -229,6 +229,7 @@ class GuidedSession:
         self._usage_agent, self._usage_seen = None, {}
         self.unmapped: list[str] = []
         self.suggestions: list[dict] = []
+        self.turned_off: list[str] = []  # needs the parent switched off; not suggested back to them
         self.on_progress: Callable[[str], None] | None = None  # set by the streaming endpoint
         self._tool_calls = 0
         self.searched_this_turn = False  # find_schools ran during the current turn
@@ -569,7 +570,7 @@ class GuidedSession:
     # ---------------------------------------------------------------- saving and restoring
 
     _STATE = ("needs", "semantic_query", "last", "pending_question", "seen_content", "seen_documents",
-              "last_programs", "unmapped", "suggestions", "_strong", "_needs_recap_pending")
+              "last_programs", "unmapped", "suggestions", "turned_off", "_strong", "_needs_recap_pending")
     _SETS = ("seen_ids", "seen_programs")
 
     def snapshot(self) -> dict:
@@ -604,7 +605,7 @@ class GuidedSession:
         self.seen_ids, self.seen_content, self.seen_programs = set(), {}, set()
         self.seen_documents = {}
         self.last_programs, self.programs_fresh = None, False
-        self.unmapped, self.suggestions = [], []
+        self.unmapped, self.suggestions, self.turned_off = [], [], []
         self._needs_recap_pending = False
         self._strong = False
         self.agent = self._new_agent()
@@ -734,9 +735,16 @@ class GuidedSession:
     def _chip_edit(self, event: dict) -> dict:
         """Editing a chip re-runs search and verify in code; no model call."""
         need_id = event["need"]
+        old = next((n for n in self.needs if n["need"] == need_id), None)
         self.needs = [n for n in self.needs if n["need"] != need_id]
-        if not event.get("removed"):
-            self.needs.append({"need": need_id, "mode": event.get("mode", "prefer"), "value": event.get("value")})
+        if event.get("removed"):
+            self.turned_off = [n for n in self.turned_off if n != need_id] + [need_id]
+        else:
+            # Moving a chip between "Must have" and "Nice to have" keeps its value ("Care until 6pm")
+            value = event["value"] if "value" in event else (old or {}).get("value")
+            self.needs.append({"need": need_id, "mode": event.get("mode") or (old or {}).get("mode") or "prefer",
+                               "value": value})
+            self.turned_off = [n for n in self.turned_off if n != need_id]
         started = time.perf_counter()
         self.last = search.find(self.needs, self.semantic_query)
         self._trace_search(self.needs, started, set())
@@ -791,6 +799,7 @@ class GuidedSession:
                                 if g.need in N.CATALOG and g.need not in current][:2]
         else:
             self.suggestions = [g for g in self.suggestions if g["need"] not in current]
+        self.suggestions = top_up_suggestions(self.suggestions, self.needs, set(self.turned_off))
         chips = []
         for n in self.needs:
             c = labels.get(n["need"])
@@ -867,6 +876,42 @@ class GuidedSession:
         return {"session_id": self.session_id, "blocks": blocks}
 
 
+SUGGESTED = 3  # "Also worth checking?" always offers this many while needs are left (decision 041)
+# Needs code may offer when the model's suggestions run out, most asked first, each with a fixed
+# reason that makes no claim about the schools. Never extra help with learning, help learning
+# English or cost: suggesting those unasked would steer by disability, national origin or income
+# (decision 007). After-school care needs a pickup time, so only the model suggests it.
+MORE_NEEDS = {
+    "mental_health": "Many parents now ask about counseling support.",
+    "safety": "Most parents want to know how safe a school feels.",
+    "small_classes": "Smaller classes can mean more time with the teacher.",
+    "transportation": "A school bus can make the daily drive easier.",
+    "high_performing": "See which schools have the highest ratings.",
+    "stem": "Science, tech and math programs vary a lot between schools.",
+    "arts": "Music, art and theater programs vary a lot between schools.",
+    "sports": "Sports teams vary a lot between schools.",
+    "gifted": "Some schools have a program for advanced learners.",
+    "college_prep": "High schools differ in how they prepare students for college.",
+    "attendance": "Good attendance is a sign students want to be there.",
+}
+
+
+def top_up_suggestions(suggestions: list[dict], needs: list[dict], turned_off: set[str]) -> list[dict]:
+    """The model's suggestions, then code's, so adding one always leaves more to choose from."""
+    taken = {n["need"] for n in needs} | turned_off
+    out = [g for g in suggestions if g["need"] not in taken][:SUGGESTED]
+    grades = next((n.get("value") or [] for n in needs if n["need"] == "grade_level"), [])
+    for need, why in MORE_NEEDS.items():
+        if len(out) >= SUGGESTED:
+            break
+        if need in taken or any(g["need"] == need for g in out):
+            continue
+        if need == "college_prep" and "h" not in grades:
+            continue
+        out.append({"need": need, "label": N.CATALOG[need]["label"], "why": why})
+    return out
+
+
 def _without_thinking(messages: list[dict]) -> list[dict]:
     """The same messages without thinking blocks (an emptied message keeps a placeholder)."""
     out = []
@@ -930,5 +975,5 @@ def _compact(found: dict) -> dict:
             "data_quality": [f["note"] for f in r["quality_flags"]],
             "cost": r.get("cost"),
             "badge": (r.get("badge") or {}).get("label"),
-        } for r in found["results"]],
+        } for r in search.model_view(found["results"])],
     }

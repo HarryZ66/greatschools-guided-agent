@@ -182,7 +182,11 @@ def _filters(needs: list[dict]) -> tuple[list[dict], dict]:
     return filters, notes
 
 
-def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) -> dict:
+RESULTS = 16    # cards the parent can page through, 4 at a time (decision 041)
+MODEL_VIEW = 8  # the top cards the agent reads and talks about, plus any school a question hint names
+
+
+def find(needs: list[dict], semantic_query: str | None = None, size: int = RESULTS) -> dict:
     """Search, verify every need for every candidate, and rank. Pure code apart from the embedding."""
     needs = [n for n in needs if n.get("need") in N.RULES]
     for n in needs:  # in place, like the location center, so chips show the mode actually used
@@ -229,10 +233,20 @@ def find(needs: list[dict], semantic_query: str | None = None, size: int = 8) ->
     shown += [r for r in results[size:] if r["school_id"] in hinted_ids]
     for r in shown:
         r["watch_out"] = watch_out(r)
+        r["hinted"] = r["school_id"] in hinted_ids
     badges.assign(needs, shown, docs)
 
-    return {"results": shown, "summary": summarize(needs, shown), "notes": notes,
+    return {"results": shown, "summary": summarize(needs, model_view(shown)), "notes": notes,
             "question_hints": hints, "total_candidates": len(hits)}
+
+
+def model_view(results: list[dict]) -> list[dict]:
+    """The results the agent sees: the top MODEL_VIEW, plus any school a question hint names.
+
+    The parent can page through more cards; keeping the agent on the top ones keeps its prompt the
+    same size as before and its counts ("2 of 8 confirm...") about the cards shown first.
+    """
+    return [r for r in results if r.get("rank", 0) <= MODEL_VIEW or r.get("hinted")]
 
 
 FILTER_NEEDS = {"grade_level", "location", "school_type"}  # already enforced by the search itself
