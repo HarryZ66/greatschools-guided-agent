@@ -482,3 +482,28 @@ just that doesn't need an AI model to read it, and many parents ask the same fir
   (the agent said "I can't sort or choose neighborhoods by how many low-income families live
   there"), and `subgroup_help_ok` accepts `high_performing` ("which schools do well for kids like
   him" can fairly mean highly rated).
+
+## 036: Conversations outlive their microVM, in AgentCore Memory
+
+Each parent's conversation runs in its own AgentCore Runtime microVM, which ends after 30 idle
+minutes, 8 hours, or any deploy. Until now that dropped the conversation: the parent's saved list
+survived (DynamoDB, decision 029), but their needs, results and the agent's open question didn't.
+At GreatSchools' traffic, with deploys during the school-choice season, that would happen to
+real parents mid-search.
+
+- After every turn the API saves the conversation's state (`GuidedSession.snapshot`, decision
+  035) as one short-term event in AgentCore Memory (`gs_agent/memory.py`), zlib-compressed.
+  `actorId` is the parent (`parent-<session id>`, standing in for a signed-in user) and
+  `sessionId` is the conversation.
+- A turn for a conversation the process doesn't have loads the newest event and carries on. The
+  trace starts with a `memory` step ("Picked up our conversation where we left off").
+- **Short-term only.** The memory has no extraction strategies: it summarizes nothing and keeps
+  nothing beyond the conversation. Events expire after 7 days, the shortest setting. Long-term
+  memory for returning parents would be opt-in, keep only grade, area, schedule and saved
+  schools, and never a child's disability or language needs (decision 007, no student data).
+- Not summarization: conversations are short, and the state that matters is structured and kept
+  by code. Summaries would add model calls and break the prompt cache.
+- A Memory failure never fails a turn: the parent starts a fresh conversation, list intact.
+  `MEMORY_ID` unset (local runs, tests) turns it off; so does `SESSION_MEMORY=off`.
+- Cost: one event per turn. At list prices that's well under a cent per hundred turns, small
+  next to the model.

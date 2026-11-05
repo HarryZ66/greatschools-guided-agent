@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import profile, programs, search, store
+from . import memory, profile, programs, search, store
 from . import runtime_client as rc
 from .agent import GuidedSession
 
@@ -49,8 +49,9 @@ async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
     })
 
 
-# Sessions live in memory: one agent conversation per parent. Fine for a single
-# hackathon task; production would persist conversation state (e.g. in DynamoDB).
+# One agent conversation per parent, in this process. After every turn it's also saved to
+# AgentCore Memory (decision 036), so a conversation this process doesn't have (a new microVM,
+# a restart, a deploy) is loaded from there.
 _sessions: dict[str, GuidedSession] = {}
 _locks: dict[str, threading.Lock] = {}
 
@@ -64,6 +65,16 @@ def _session(session_id: str | None) -> GuidedSession:
             session.saved = {s["school_id"] for s in store.saved_schools(session_id)}
         except Exception:
             log.exception("could not load saved schools for %s", session_id)
+        if (saved := memory.load(session_id)):  # and its conversation in AgentCore Memory
+            try:
+                session.restore(saved["conversation"])
+                session.turn_count = saved.get("turn", 0)
+                session.usage.update(saved.get("usage", {}))
+                session.usage_by_model = saved.get("usage_by_model", {})
+                session.restored = True
+            except Exception:
+                log.exception("could not restore conversation %s; starting fresh", session_id)
+                session = GuidedSession(session_id)
     _sessions[session.session_id] = session
     _locks[session.session_id] = threading.Lock()
     return session
@@ -129,9 +140,17 @@ def _run_turn(session: GuidedSession, event: Event) -> dict:
         response["trace"]["steps"].insert(0, {
             "tool": "runtime", "service": "Amazon Bedrock AgentCore Runtime",
             "text": "Ran this turn in your own AgentCore Runtime session, which keeps our conversation between turns"})
+    if getattr(session, "restored", False) and isinstance(response.get("trace"), dict):
+        session.restored = False
+        response["trace"]["steps"].insert(0, {
+            "tool": "memory", "service": memory.SERVICE,
+            "text": "Picked up our conversation where we left off, from AgentCore Memory"})
     # Numbers this session's replies, so the parent can rate a reply (POST /api/feedback with `turn`)
     session.turn_count = getattr(session, "turn_count", 0) + 1
     response["turn"] = session.turn_count
+    with _locks[session.session_id]:  # keep the conversation for the next process that needs it
+        memory.save(session.session_id, {"conversation": session.snapshot(), "turn": session.turn_count,
+                                         "usage": session.usage, "usage_by_model": session.usage_by_model})
     log.info("turn %s %s %dms", session.session_id, event.type, response["elapsed_ms"])
     return response
 

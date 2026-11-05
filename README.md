@@ -42,6 +42,7 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | Amazon DynamoDB | Session state, saved schools and thumbs up/down feedback |
 | Amazon S3 | Data files and the frontend site |
 | Amazon Bedrock AgentCore Runtime | Runs the agent: each parent's conversation in its own warm session |
+| Amazon Bedrock AgentCore Memory | Short-term memory: each conversation's state after every turn, so a new session picks it up after an idle timeout or a deploy (decision 036) |
 | Amazon ECS on AWS Fargate (ARM64) | Runs the public API, which passes agent turns to AgentCore Runtime |
 | Elastic Load Balancing (ALB) | Routes traffic to the agent task |
 | Amazon CloudFront | One HTTPS URL: `/api/*` goes to the agent, everything else to the frontend |
@@ -192,7 +193,7 @@ Load test against the deployed URL: 8 parents searching at the same moment all g
 Other tests:
 
 ```bash
-cd agent && ../.venv/bin/pytest -q tests                  # 98 offline tests, including AgentCore, Gateway, knowledge-base citations and saved-search integration
+cd agent && ../.venv/bin/pytest -q tests                  # 142 offline tests, including AgentCore, Gateway, Memory, model routing, the fast path and the cache
 python3 evals/smoke_api.py https://<cloudfront-domain>    # 26 end-to-end API checks against a deployment, including streaming
 python3 agent/scripts/check_front_door.py                # the agent runtime rejects calls without an OAuth token
 python3 agent/scripts/gateway_tools_demo.py              # lists the Gateway's MCP tools and calls one
