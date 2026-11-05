@@ -5,7 +5,8 @@ Bedrock) behind FastAPI on Fargate, OpenSearch for search, DynamoDB for saves an
 
 Read before changing code:
 
-- `README.md`: layout, deploy, data loading, local run, tests
+- `docs/technical.md`: layout, AWS services, deploy, data loading, local run, tests, CI/CD
+- `docs/features.md` and `docs/pain-points.md`: what parents can do, and the problems it answers
 - `docs/contract.md`: needs catalog, status rules, API and UI blocks (source of truth)
 - `docs/decisions.md`: why things are the way they are
 - `docs/next-steps.md`: what's left to build, in priority order

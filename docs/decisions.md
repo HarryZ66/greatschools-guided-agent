@@ -157,7 +157,7 @@ away"). A care gap is only filled by a program whose session covers the whole ga
   (`us.anthropic.claude-sonnet-5-5`), one model for the whole turn. Set `MAIN_MODEL` to change it.
 - Embeddings: Amazon Titan Text Embeddings v2 (1024 dimensions)
 - Claude Haiku 5.5 (`us.anthropic.claude-haiku-5-5`) was evaluated as a cheaper option: about a third
-  of the cost per turn, but it failed more eval cases, so Sonnet stays the default (see README, Evaluation).
+  of the cost per turn, but it failed more eval cases, so Sonnet stays the default (see `docs/technical.md`, Evaluation).
 
 ## 021: Answering a question keeps the parent's time and budget
 
