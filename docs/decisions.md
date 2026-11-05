@@ -431,3 +431,22 @@ twentieth as much per token, and passed 34 of 36 evals on its own.
 - `FAST_MODEL` and `STRONG_MODEL` set the tiers. `MAIN_MODEL` pins every turn to one model; the
   evals use it to compare models (`run_evals.py --model ...`). Eval costs now price each model's
   tokens at its own list price ($0.10 / $0.50 and $2 / $10 per million input / output tokens).
+
+## 034: The model writes less: shorter messages, one-line reasons, option words only
+
+Output tokens cost 5× input tokens, and most of what the model writes is structured data, not the
+reply a parent reads. Thinking stays at each model's default (the team chose not to cut reasoning),
+so this trims only the structured reply:
+
+- The message is 1–2 short sentences, most important first (was 1–3). It pairs with "View more"
+  (decision 032): the first sentence is what parents see.
+- The question's `why` is one short sentence. It sits behind "View more".
+- The model writes answer options as plain words; code numbers them (`o1`, `o2`, ...). The API
+  still returns `{"id", "label"}` options.
+- Chip labels stay with the model: code-written labels would be English only, and the agent
+  answers in the parent's language.
+
+Measured on the evals (one run each): output tokens per turn 1,151 → 1,081 (−6%), reply text
+median 355 → 293 characters (−18%), still 38 / 38. Cost per turn didn't move at four decimals:
+with Haiku answering most turns, Sonnet's share (11% of calls, 71% of cost) matters far more
+than reply length, so the sensitive-topic list in `routing.py` is the next cost lever to review.

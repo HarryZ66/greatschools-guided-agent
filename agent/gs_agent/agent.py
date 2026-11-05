@@ -71,15 +71,11 @@ class ChipLabel(BaseModel):
     value: Any = Field(default=None, description="Value in the catalog's format, if the need has one")
 
 
-class Option(BaseModel):
-    id: str
-    label: str
-
-
 class Question(BaseModel):
     text: str = Field(description="One short question in plain language")
-    why: str = Field(description="Why this question changes the results, citing the counts you saw")
-    options: list[Option] = Field(description="2-4 tappable answers")
+    why: str = Field(description="One short sentence: why the answer changes the results")
+    # Code gives each option its id, so the model only writes the words (decision 034)
+    options: list[str] = Field(description="2-4 short tappable answers")
 
 
 class Callout(BaseModel):
@@ -101,8 +97,8 @@ class Decision(BaseModel):
     suggestions: list[Suggestion] = Field(default_factory=list, description=(
         "0-2 needs the parent didn't mention but likely cares about, given what they said. Empty if none."))
     question: Question | None = Field(default=None, description="At most one question, or null")
-    message: str = Field(description="1-3 plain sentences for the parent. No jargon. Don't restate the cards. "
-                                     "If you ask a question, don't repeat it here.")
+    message: str = Field(description="1-2 short plain sentences for the parent, most important first. No jargon. "
+                                     "Don't restate the cards. If you ask a question, don't repeat it here.")
     callouts: list[Callout] = Field(default_factory=list, description="0-2 honest notes about the data")
     sources: list[str] = Field(default_factory=list,
                                description="ids of guide entries from lookup_content that your message relies on")
@@ -733,7 +729,8 @@ class GuidedSession:
         if decision and decision.question:
             q = decision.question
             self.pending_question = {"question_id": "q-" + uuid.uuid4().hex[:6], "text": q.text, "why": q.why,
-                                     "options": [{"id": o.id, "label": plain_label(o.label)} for o in q.options],
+                                     "options": [{"id": f"o{i + 1}", "label": plain_label(label)}
+                                                 for i, label in enumerate(q.options)],
                                      "allow_text": True}
             blocks.append({"type": "clarifying_question", **self.pending_question})
 

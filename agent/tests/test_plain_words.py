@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from gs_agent import api
 from gs_agent import needs as N
-from gs_agent.agent import JARGON, ChipLabel, Decision, GuidedSession, Option, Question, plain_label
+from gs_agent.agent import JARGON, ChipLabel, Decision, GuidedSession, Question, plain_label
 
 
 def test_catalog_labels_have_no_school_jargon():
@@ -22,11 +22,12 @@ def test_chips_options_and_suggestions_are_cleaned_in_the_response():
     s.needs = [{"need": "special_ed", "mode": "prefer", "value": None}]
     d = Decision(chips=[ChipLabel(need="special_ed", label="Extra help for ADHD (IEP/504)", source="stated")],
                  message="ok", question=Question(text="Which matters?", why="It changes the ranking.",
-                                                 options=[Option(id="a", label="Learning support (IEP or 504)"),
-                                                          Option(id="b", label="A school bus")]))
+                                                 options=["Learning support (IEP or 504)",
+                                                          "A school bus"]))
     blocks = {b["type"]: b for b in s._blocks(d)["blocks"]}
     assert blocks["criteria_chips"]["chips"][0]["label"] == "Extra help for ADHD"
-    assert [o["label"] for o in blocks["clarifying_question"]["options"]] == ["Learning support", "A school bus"]
+    assert blocks["clarifying_question"]["options"] == [{"id": "o1", "label": "Learning support"},
+                                                        {"id": "o2", "label": "A school bus"}]
 
 
 def test_location_note_is_in_miles():
