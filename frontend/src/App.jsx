@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, forwardRef } from 'react'
+import { useState, useRef, useEffect, useId, forwardRef } from 'react'
 import { motion, AnimatePresence, MotionConfig } from 'motion/react'
 import logo from './assets/greatschools-logo.png'
 import { turn, saveSchool, unsaveSchool, rateReply, getSchool } from './api.js'
@@ -321,15 +321,61 @@ function Rate({ vote, onVote }) {
   )
 }
 
+// Splits a reply into its first sentence and the rest, for the short view (decision 030).
+// Code only, so the prompt and evals don't change. A boundary is ., ! or ? followed by a
+// space and a word that doesn't start lowercase (so "St. Johns" and "4.5 miles" don't split),
+// or a line break. A first sentence under 25 characters ("Good question.") takes the next one too.
+const ABBR = /\b(?:St|Dr|Mr|Mrs|Ms|Ave|Blvd|Rd|Mt|Ft|Jr|Sr|No|vs|etc|approx|e\.g|i\.e|U\.S)\.$/i
+export function firstSentence(text) {
+  const t = (text || '').trim()
+  const end = /[.!?…]+["”’)\]*_]*(?=\s+[^\sa-z])|\n/g
+  for (let m; (m = end.exec(t));) {
+    const cut = m.index + m[0].length
+    const head = t.slice(0, cut).trim()
+    if (m[0] !== '\n' && ABBR.test(head)) continue
+    if (head.length < 25) continue
+    return [head, t.slice(cut).trim()]
+  }
+  return [t, '']
+}
+
 function Message({ m, live, onOption, onVote, onOpenComparison, busy }) {
+  const [open, setOpen] = useState(false)
+  const ai = m.r === 'ai' && !m.error
+  const [summary, rest] = ai ? firstSentence(m.t) : [m.t, '']
+  const notes = m.callouts?.length || 0
+  const hasMore = ai && !!(rest || notes || m.sources?.length || m.question?.why)
+  const full = open || !hasMore
+  const id = useId()
   return (
     <motion.div className={'turn ' + m.r} style={{ transformOrigin: m.r === 'me' ? 'bottom right' : 'top left' }}
       initial={{ opacity: 0, y: 12, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={soft}>
       <div className={'m ' + m.r + (m.error ? ' err' : '')}>
-        {m.t}
-        {m.sources?.length > 0 && <small className="src">From the GreatSchools guide: {m.sources.map(s => s.document ? `${s.title} (${s.document})` : s.title).join(' · ')}</small>}
-        {m.callouts?.map((c, i) => <p key={i} className="callout"><b>{c.name}:</b> {c.text}</p>)}
-        {m.question && <p className="ask"><b>{m.question.text}</b>{m.question.why && <small>{m.question.why}</small>}</p>}
+        {summary}
+        {hasMore && (
+          <span className="more">
+            <button className="link" aria-expanded={open} aria-controls={id} onClick={() => setOpen(o => !o)}>
+              {open ? 'View less' : 'View more'}
+            </button>
+            {/* Data notes stay signposted while collapsed: flagging old or missing data is the point */}
+            {!open && notes > 0 && (
+              <button className="notes" onClick={() => setOpen(true)} aria-label={`Show ${notes} data ${notes === 1 ? 'note' : 'notes'}`}>
+                ⚠️ {notes} data {notes === 1 ? 'note' : 'notes'}
+              </button>
+            )}
+          </span>
+        )}
+        <AnimatePresence initial={false}>
+          {full && (rest || notes > 0 || m.sources?.length > 0) && (
+            <motion.div id={id} className="rest" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }}>
+              {rest && <div className="t">{rest}</div>}
+              {m.sources?.length > 0 && <small className="src">From the GreatSchools guide: {m.sources.map(s => s.document ? `${s.title} (${s.document})` : s.title).join(' · ')}</small>}
+              {m.callouts?.map((c, i) => <p key={i} className="callout"><b>{c.name}:</b> {c.text}</p>)}
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {m.question && <p className="ask"><b>{m.question.text}</b>{full && m.question.why && <small>{m.question.why}</small>}</p>}
         {m.comparison && <button className="link" onClick={() => onOpenComparison(m.comparison)}>Open the comparison table</button>}
         {m.programs?.length > 0 && <div className="progs">{m.programs.map((p, i) => <ProgramCard key={p.program_id} p={p} i={i} />)}</div>}
       </div>

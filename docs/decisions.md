@@ -354,3 +354,26 @@ details panel. Each card can carry one badge that says what the school stands ou
 - "Good to know" now uses the plain-words evidence ("Class size: large"), not raw field names.
 - Not done: a "culture" badge. Culture isn't in the needs catalog; it could become a need built
   on the "Belonging / Inclusion" and "Teachers / Staff" review topics.
+
+## 030: Chat replies show one sentence, with "View more" for the rest
+
+Replies had grown long: too much to read for a parent, or in a demo. Each agent reply now shows its
+first sentence by default. What stays visible:
+
+- the first sentence of the reply's text,
+- the agent's question and its answer buttons (they are how the agent guides the parent),
+- the "Open the comparison table" link and program cards,
+- "How I checked this" (still collapsed, as before).
+
+"View more" opens the rest of the text, the "I checked this for you" data notes
+(`evidence_callout`), the reason for the question (`why`) and the guide sources.
+
+- **Honesty stays visible.** A collapsed reply with data notes shows "⚠️ 1 data note" (or "2 data
+  notes"), which opens the reply. Flagging old or missing data is what sets this agent apart, so
+  the hint is never hidden.
+- **Frontend only.** `firstSentence()` in `App.jsx` splits the text in code. The prompt, the API
+  and the evals don't change. The splitter skips abbreviations ("St.", "e.g.") and decimals
+  ("4.5 miles"), and joins a very short opener ("Got it.") to the next sentence.
+- Known gap: a data problem that the model writes into the text itself, not as a callout, is
+  behind "View more" and gets no hint. If that turns out to be common, the fix is in the prompt
+  (put such facts in a callout), not here.

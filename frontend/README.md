@@ -50,7 +50,10 @@ for reduced motion.
   - `program_results`: program cards under the schools, in miles, plus the names of programs
     skipped because their sessions already ended.
   - `text`, `evidence_callout` and `clarifying_question`: one chat reply. Question options are
-    buttons that send an `answer`; typing while a question is open answers it too.
+    buttons that send an `answer`; typing while a question is open answers it too. Each reply
+    shows its first sentence and the question; "View more" opens the rest of the text, the data
+    notes (`evidence_callout`), the question's `why` and guide sources. A collapsed reply with data
+    notes shows "⚠️ 1 data note" (decision 030).
   - `comparison`: the Compare modal (pick 2 schools, then "Compare schools"). The reply in the chat
     carries the summary and an "Open the comparison table" link.
   - `trace` and `turn`: under each reply, "How I checked this" and "Helpful? 👍 👎" (rates that reply).
