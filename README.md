@@ -193,7 +193,7 @@ Load test against the deployed URL: 8 parents searching at the same moment all g
 Other tests:
 
 ```bash
-cd agent && ../.venv/bin/pytest -q tests                  # 142 offline tests, including AgentCore, Gateway, Memory, model routing, the fast path and the cache
+cd agent && ../.venv/bin/pytest -q tests                  # 157 offline tests, including AgentCore, Gateway, Memory, model routing, the fast path, the cache and the Fargate fallback
 python3 evals/smoke_api.py https://<cloudfront-domain>    # 26 end-to-end API checks against a deployment, including streaming
 python3 agent/scripts/check_front_door.py                # the agent runtime rejects calls without an OAuth token
 python3 agent/scripts/gateway_tools_demo.py              # lists the Gateway's MCP tools and calls one

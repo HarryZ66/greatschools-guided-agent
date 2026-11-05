@@ -152,11 +152,13 @@ def test_oauth_calls_carry_a_cached_bearer_token(monkeypatch):
     assert runtime_calls[0]["headers"][rc.SESSION_HEADER] == rc.runtime_session_id("abc")
 
 
-def test_a_rejected_token_is_dropped_and_the_parent_gets_a_plain_message(monkeypatch):
+def test_a_rejected_token_is_dropped_and_the_turn_runs_on_fargate(monkeypatch):
     http = FakeHttp(runtime_status=401, runtime_body=b'{"message": "Unauthorized"}')
     _use_oauth(monkeypatch, http)
+    monkeypatch.setattr(api, "_run_turn", lambda session, event: {"session_id": session.session_id, "blocks": [],
+                                                                   "trace": {"steps": []}})
     r = TestClient(api.app).post("/api/turn", json={"session_id": "abc", "event": {"type": "query", "text": "hi"}})
-    assert r.status_code == 502 and "not reachable" in r.json()["detail"]
+    assert r.status_code == 200 and r.json()["trace"]["steps"][0]["tool"] == "fallback"
     assert rc._token["value"] is None
 
 

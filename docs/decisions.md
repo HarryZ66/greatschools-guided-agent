@@ -524,3 +524,19 @@ real parents mid-search.
   `MEMORY_ID` unset (local runs, tests) turns it off; so does `SESSION_MEMORY=off`.
 - Cost: one event per turn. At list prices that's well under a cent per hundred turns, small
   next to the model.
+
+## 038: If AgentCore Runtime is down, Fargate runs the turn
+
+Every agent turn, save and profile call goes through AgentCore Runtime (decision 025) behind OAuth
+(026). One failure there (a token, throttling, a cold start that times out) used to show the parent
+"Our assistant is not reachable" with no way forward. The Fargate API has the same code and the same
+permissions, so when the runtime can't be reached it now runs the call itself, and the trace's first
+step says so ("AgentCore Runtime didn't answer, so this turn ran on our Fargate service instead").
+After a failure it skips the runtime for 2 minutes, so later parents don't each wait for the same
+timeout. Errors the runtime returns on purpose (an unknown school, a bad request) still go to the
+parent. A turn that falls back picks up the conversation from AgentCore Memory (decision 037),
+since the Fargate task has the same memory id and permissions; without Memory it starts fresh,
+and the saved list stays either way, because it lives in DynamoDB. Known gap: if the runtime comes
+back while its microVM still holds the conversation, that copy doesn't include the turns Fargate
+ran in between. A streamed turn falls back only if the runtime fails before sending
+anything; once progress has reached the parent, a failure is reported as an error.
