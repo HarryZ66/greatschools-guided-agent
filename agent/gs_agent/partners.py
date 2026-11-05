@@ -1,4 +1,4 @@
-"""Local partners who visit schools with parents (decision 041). Code only, no model call.
+"""Local partners who visit schools with parents (decision 042). Code only, no model call.
 
 GreatSchools works with nonprofits and local partners who know the schools first-hand. This
 closes the parent's journey: from a saved list to a visit, or a call, with someone local.

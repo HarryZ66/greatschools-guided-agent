@@ -78,7 +78,7 @@ export const rateReply = (sessionId, turn, vote) =>
 export const getSchool = (sessionId, schoolId) =>
   json(`/api/schools/${encodeURIComponent(schoolId)}${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`)
 
-// Local partners who visit schools with parents (decision 041; code only, no model call).
+// Local partners who visit schools with parents (decision 042; code only, no model call).
 // With no school ids, the server uses the parent's saved list.
 export const getPartners = (sessionId, schoolIds = []) =>
   json(`/api/partners?session_id=${encodeURIComponent(sessionId)}${schoolIds.length ? `&school_ids=${schoolIds.map(encodeURIComponent).join(',')}` : ''}`)

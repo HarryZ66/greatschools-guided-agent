@@ -1,4 +1,4 @@
-"""The agent keeps asking to build the family profile, and closes with a local partner visit (decision 041)."""
+"""The agent keeps asking to build the family profile, and closes with a local partner visit (decision 042)."""
 
 from datetime import date
 
@@ -170,3 +170,11 @@ def test_a_chip_edit_keeps_a_question_whose_topic_was_already_known(session):
                                 "topic": "learning"}
     out = session.handle({"type": "chip_edit", "need": "transportation", "mode": "prefer"})
     assert block(out, "clarifying_question")["question_id"] == "q-ell"
+
+
+def test_turning_a_chip_off_counts_as_a_decision_on_its_topic(session):
+    """A parent who turns off "School bus" isn't asked how their child gets to school."""
+    session.needs.append({"need": "transportation", "mode": "prefer"})
+    out = session.handle({"type": "chip_edit", "need": "transportation", "removed": True})
+    assert block(out, "clarifying_question")["topic"] == "learning"
+    assert "schedule" not in [t.id for t in family.remaining(session._profile_needs(), set(), session.asked_topics)]

@@ -90,7 +90,7 @@ Event types:
 | `query` | `text` | Yes |
 | `answer` | `question_id`, `option_id` or `text` | Yes |
 | `compare` | `school_ids` (2) | Yes |
-| `chip_edit` | `need`, `mode` (require/prefer/avoid) or `removed: true` | No: code re-runs search and verify |
+| `chip_edit` | `need`, `mode` (require/prefer/avoid) and optional `value`, or `removed: true` | No: code re-runs search and verify |
 | `new_search` | none | No: forgets the conversation, keeps the session and its saved list; the response adds `saved` |
 
 Omit `session_id` on the first turn; every response returns the `session_id` to send next time.
@@ -116,7 +116,7 @@ Saving and feedback skip the agent entirely:
   3) are library or community programs near that school that cover one of the parent's needs it
   doesn't fully meet; each has the `program_results` fields plus `fills_need` and a code-written `why`
   ("Care at Tamarind Cove ends at 5:00 PM. After-School Homework Help … runs 3:30 PM–6:00 PM …").
-  `follow_up` (decision 041) holds at most one block, written by code: the next family profile
+  `follow_up` (decision 042) holds at most one block, written by code: the next family profile
   `clarifying_question` (when no question is open), or a `visit_offer` once the profile is complete.
   Show it as an agent reply; answer the question with an `answer` turn as usual.
 - `GET /api/saved?session_id=…` → `{saved: [{school_id, name, at}]}`
@@ -145,7 +145,7 @@ Saving and feedback skip the agent entirely:
     yet. With `unavailable`, keep the school's checks visible and explain that program lookup
     failed. Without session needs, return empty `criteria` and `programs`; ask the parent to
     describe their needs instead of claiming a perfect fit.
-- `GET /api/partners?session_id=…&school_ids=a,b` (decision 041): local partners who serve those
+- `GET /api/partners?session_id=…&school_ids=a,b` (decision 042): local partners who serve those
   schools' cities (without `school_ids`, the saved list's). → `{schools: [{school_id, name}],
   partners: [{partner_id, name, kind, what, cities, languages, ways, reply_days, cost, schools, sample}],
   ways: {visit: "Visit schools with a guide", call: "Talk with a guide first"}, times: [...], requests: [...]}`.
@@ -246,10 +246,17 @@ a service. Render `service` and `text` as given; new `tool` values may appear la
 `answered` (from a clarifying question).
 
 `unmapped` lists wishes the parent stated that no need can check yet (e.g. "Robotics club at the
-school"); show them as greyed chips. `suggested` holds up to 2 needs the parent didn't mention,
-each `{need, label, why}`; show them as tap-to-add chips that send a `chip_edit` with mode `prefer`.
+school"); show them as greyed chips. `suggested` holds 3 needs the parent didn't mention, each
+`{need, label, why}`; show them as tap-to-add chips that send a `chip_edit` with mode `prefer`. Up
+to 2 come from the model; code fills the rest from a fixed list (`MORE_NEEDS` in `agent.py`, with
+fixed reasons), so adding one always leaves more to choose from. Code never offers `special_ed`,
+`ell_support` or `cost`, and never offers a need the parent turned off (decision 041).
 
-`profile` (decision 041) is the family profile the agent's questions fill in, computed by code:
+A `chip_edit` with a `mode` and no `value` keeps the need's current value, so moving "Care until
+6pm" from must-have to nice-to-have keeps 6pm. `removed: true` turns the need off; sending it
+again with its `mode` and `value` turns it back on.
+
+`profile` (decision 042) is the family profile the agent's questions fill in, computed by code:
 `{"topics": [{"id": "learning", "label": "How your child learns", "done": true}, ...], "done": 2, "total": 6}`.
 Topics: `learning`, `schedule`, `wellbeing`, `academics`, `interests`, `budget`. A topic is done when
 one of its needs is set or the parent answered a question about it. Show it as a small meter.
@@ -274,13 +281,13 @@ At most one per turn.
 ```
 
 `topic` (optional) names the family profile topic the question is about. Once schools are shown,
-every turn asks one (decision 041): a trade-off first, otherwise the next unknown topic. A
+every turn asks one (decision 042): a trade-off first, otherwise the next unknown topic. A
 `chip_edit` keeps the open question (same `question_id`; don't show it twice) unless the edit
 answered it, and otherwise asks the next topic in code's words.
 
 ### `visit_offer`
 
-The step after saving (decision 041): see the schools in person with a local partner. Code adds
+The step after saving (decision 042): see the schools in person with a local partner. Code adds
 it on a `compare` turn, when the parent asks about visiting (the model sets `offer_visit`), or once
 on its own when the profile is complete and the parent has saved schools. Partners come from code.
 
@@ -339,6 +346,11 @@ parent didn't ask about (`asked: false`), which never include `special_ed` or `e
 `rank` and `score` order the results and feed the trade-off hints; the parent app doesn't show
 them (no rank numbers, no "% fit"). The per-need `criteria` are shown in the details panel, not
 on the card.
+
+`results` holds up to 16 schools (`search.RESULTS`), plus any school a trade-off hint names. The
+app shows 4 and "View more schools" adds 4 at a time; it opens more at once when the reply names
+a school further down. The agent reads only the top 8 and the hinted ones (`search.model_view`),
+and the search's per-need counts cover those same schools (decision 041).
 
 ### `program_results`
 

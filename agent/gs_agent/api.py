@@ -103,7 +103,7 @@ class SaveRequest(BaseModel):
 
 
 class VisitRequest(BaseModel):
-    """A visit or call with a local partner, for schools the parent is weighing (decision 041)."""
+    """A visit or call with a local partner, for schools the parent is weighing (decision 042)."""
     session_id: str
     partner_id: str
     school_ids: list[str]
@@ -314,7 +314,7 @@ def save(request: SaveRequest) -> dict:
             pairs = programs.for_school(request.school_id, school, session.needs)
         except Exception:
             log.exception("could not match programs for %s", request.school_id)
-    # The agent keeps going (decision 041): the next profile question, or a visit offer. Code only.
+    # The agent keeps going (decision 042): the next profile question, or a visit offer. Code only.
     follow_up = []
     if session:
         try:

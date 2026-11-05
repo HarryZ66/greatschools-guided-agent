@@ -2,7 +2,7 @@
 
 Single table (see infra/stacks/data_stack.py):
     pk = SESSION#<id>   sk = SAVED#<school_id> | FEEDBACK#TURN#<n> or FEEDBACK#<school_id> | SEARCH#<iso time>
-                        | VISIT#<request id> (a visit or call request to a local partner, decision 041)
+                        | VISIT#<request id> (a visit or call request to a local partner, decision 042)
     pk = CACHE#<key>    sk = TURN (a cached first-turn answer, with `expires`)
 """
 

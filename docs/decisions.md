@@ -582,7 +582,36 @@ deployed app.
   with the tiers (list prices). At GreatSchools' traffic that difference is large, so this is the
   setting to revisit before production.
 
-## 041: The agent keeps asking until it knows the family, then offers a visit with a local partner
+## 041: Four cards at first, chips in two groups, and turning a need off is one tap to undo
+
+The team asked for a shorter first page, clearer chips and a quick way to try a search without
+one need.
+
+- **Cards:** search returns up to 16 schools and the app shows 4, with "View more schools" for
+  4 more at a time. A chip edit keeps how many the parent opened. When the reply names a school
+  further down, the app opens enough cards to show it, so the chat never talks about a hidden card.
+- **The agent still reads 8.** It sees the top 8 plus any school a trade-off hint names, and the
+  per-need counts cover those, so prompts, cost and evals stay as before. Badges are picked across
+  all the cards, so their "why" counts all of them.
+- **Chips:** one line with "Must have" chips, then "Nice to have" chips, each group named by a
+  small label. Tapping a chip opens a menu to move it to the other group or turn it off; × turns
+  it off at once. Moving keeps the chip's value (the server keeps `value` when a `chip_edit` only
+  changes `mode`). Grade and place stay fixed; a new search changes them.
+- **Turning off:** a turned-off chip stays at the end of the line, faded; one tap turns it back
+  on. The chat reply to turning it off has a "Turn ... back on" button too. Both send the old mode
+  and value, in code, with no model call (decision 006).
+- **The filters stay put.** They are sticky at the top of the list pane while the cards scroll.
+  The header is two lines: about 60px on a laptop and 84px on a phone, where each line scrolls
+  sideways instead of wrapping.
+- **"Also worth checking?" never runs dry.** The model still writes up to 2 suggestions; code tops
+  the list up to 3 from a fixed list with fixed reasons that make no claim about the schools. This
+  widens decision 002's "the model writes suggestions" to "the model writes them first". Code
+  never offers extra help with learning, help learning English or cost (decision 007), never
+  offers a need the parent turned off, and offers college prep only for high school.
+- Not done: dragging a chip between groups. The menu does the same job and works with a keyboard
+  and a screen reader.
+
+## 042: The agent keeps asking until it knows the family, then offers a visit with a local partner
 
 Our main idea is that the agent asks what parents don't know to ask (pain point #2). In practice it
 often stopped: comparisons were told not to ask, chip edits cleared the open question, and saves

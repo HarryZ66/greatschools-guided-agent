@@ -96,7 +96,8 @@ def test_unmapped_and_suggested_chips_skip_needs_already_chosen():
                               Suggestion(need="not_a_need", label="x", why="y")])
     chips = s._blocks(d)["blocks"][0]
     assert chips["unmapped"] == ["Montessori"]
-    assert [g["need"] for g in chips["suggested"]] == ["transportation"]
+    # The model's valid suggestion comes first; code tops the list up (decision 041)
+    assert [g["need"] for g in chips["suggested"]] == ["transportation", "mental_health", "safety"]
 
 
 def test_failed_model_turn_answers_from_code_without_stale_results():
