@@ -173,6 +173,8 @@ def main() -> None:
     parser.add_argument("--model", help="Bedrock model id to use instead of the default")
     parser.add_argument("--only", help="comma-separated case ids")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--min-pass", type=int, default=None,
+                        help="exit with status 1 if fewer cases pass (CI uses this; the model varies run to run)")
     parser.add_argument("--cache", action="store_true",
                         help="allow the shared first-turn cache (off by default, so evals measure the agent)")
     args = parser.parse_args()
@@ -252,6 +254,9 @@ def main() -> None:
     (out_dir / "latest.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print("\n".join(lines))
+    if args.min_pass is not None and summary["passed"] < args.min_pass:
+        print(f"Only {summary['passed']} cases passed; at least {args.min_pass} needed.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -540,3 +540,29 @@ and the saved list stays either way, because it lives in DynamoDB. Known gap: if
 back while its microVM still holds the conversation, that copy doesn't include the turns Fargate
 ran in between. A streamed turn falls back only if the runtime fails before sending
 anything; once progress has reached the parent, a failure is reported as an error.
+
+## 039: CI on every pull request, and `main` deploys itself
+
+Until now every check and deploy ran from someone's laptop, which meant deploys from different
+local branches could undo each other (it happened twice during the hackathon).
+
+- **CI** (`.github/workflows/ci.yml`) on every pull request, with no AWS access: the agent's
+  offline tests, the frontend build, and `cdk synth` for every stack.
+- **Evals** (`evals.yml`) on pull requests that change `agent/` or `evals/`: the 38 cases on real
+  Bedrock models (about 3 minutes, about $0.15), results posted on the PR. The job fails below 36
+  passes: the model varies run to run, so one or two misses don't block a PR, but a regression does.
+  Pull requests from forks skip it (they get no AWS access).
+- **Deploy** (`deploy.yml`) on every merge to `main` (docs-only changes skip it) or by hand: CI
+  again, then `cdk deploy GsDataStack GsAppStack`, then `evals/smoke_api.py` against the live URL.
+  One deploy at a time; a newer merge waits. It builds on GitHub's ARM64 runners, so the ARM64
+  agent images build natively. `main` is the only branch that deploys.
+- **No AWS keys in GitHub.** Workflows sign in with OIDC (`infra/stacks/ci_stack.py`, stack
+  `GsCiStack`): `GsGitHubDeployRole` trusts only runs on `main` of this repo and can only assume
+  the CDK bootstrap roles; `GsGitHubEvalsRole` (pull requests and `main`) is read-only. GsCiStack
+  is deployed once by hand; the pipeline never changes its own access.
+- The smoke test after each deploy adds searches and saves to the metrics; run
+  `data/reset_metrics.py --yes` before a demo, as before.
+- Not done: per-PR preview environments (each PR's own app stack and URL, sharing the data layer;
+  about $2 a day each and 10-15 minutes per deploy), and separate AWS accounts per environment,
+  which is what GreatSchools' multi-account setup would use in production. Branch protection
+  ("PRs must pass CI") needs a repo admin to turn on.

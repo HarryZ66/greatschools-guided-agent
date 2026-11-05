@@ -37,7 +37,7 @@ blocks or endpoints in `docs/contract.md` needs the matching change in `frontend
 - Unit tests (offline): `cd agent && ../.venv/bin/pytest -q tests`
 - Evals: `AWS_PROFILE=gs-sandbox AWS_DEFAULT_REGION=us-east-1 .venv/bin/python evals/run_evals.py`
 - Live API checks: `python3 evals/smoke_api.py https://<cloudfront-domain>`
-- Deploy: `cd infra && cdk deploy --all` (run `aws sts get-caller-identity --profile gs-sandbox` first to refresh credentials)
+- Deploy: merging to `main` deploys through GitHub Actions (`.github/workflows/deploy.yml`, decision 039). By hand: `cd infra && cdk deploy --all` (run `aws sts get-caller-identity --profile gs-sandbox` first to refresh credentials)
 - Generate data: `.venv/bin/python data/generate.py --count 80` and `.venv/bin/python data/generate_programs.py`
 - Load data: `data/ingest.py`, `data/ingest_programs.py`, `data/ingest_content.py` (each with `--recreate`)
 - Run the API locally: `cd agent && PYTHONPATH=. ../.venv/bin/uvicorn gs_agent.api:app --port 8000 --reload`

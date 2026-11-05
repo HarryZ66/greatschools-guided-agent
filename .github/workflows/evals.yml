@@ -1,0 +1,71 @@
+# Runs the 38 agent evals on pull requests that change the agent or the evals (decision 039), and
+# posts the results table on the PR. Uses real Bedrock models (about 3 minutes, about $0.15 a run)
+# through a read-only AWS role (GsCiStack). Fails if fewer than MIN_PASS cases pass: the model
+# varies a little run to run, so one or two misses don't block a PR, but a real regression does.
+name: Evals
+
+on:
+  pull_request:
+    paths: ["agent/**", "evals/**", ".github/workflows/evals.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write       # OIDC sign-in to AWS
+  pull-requests: write  # post the results table
+
+concurrency:
+  group: evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ROLE: arn:aws:iam::205930628752:role/GsGitHubEvalsRole
+  KNOWLEDGE_BASE_ID: VICX17XM3C
+  MIN_PASS: "36"
+
+jobs:
+  evals:
+    name: Agent evals
+    # Pull requests from forks get no AWS access, so they skip this job
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: agent/requirements*.txt
+      - run: pip install -r agent/requirements.txt
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE }}
+          role-session-name: github-evals-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Find the search endpoint
+        run: |
+          endpoint=$(aws cloudformation describe-stacks --stack-name GsDataStack \
+            --query "Stacks[0].Outputs[?OutputKey=='SearchEndpoint'].OutputValue" --output text)
+          echo "SEARCH_ENDPOINT=$endpoint" >> "$GITHUB_ENV"
+      - name: Run the evals (cache off, so they measure the agent)
+        env:
+          PYTHONUTF8: "1"
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+        run: python evals/run_evals.py --min-pass "$MIN_PASS"
+      - name: Post the results on the pull request
+        if: always() && github.event_name == 'pull_request' && hashFiles('evals/results/latest.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # latest.md is committed, so post it only if this run rewrote it
+          if git diff --quiet -- evals/results/latest.md; then echo "No new results to post"; exit 0; fi
+          { echo "### Agent evals for ${GITHUB_SHA::7}"; echo; cat evals/results/latest.md; } > comment.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: evals/results/*.json
+          if-no-files-found: ignore
