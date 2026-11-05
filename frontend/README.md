@@ -15,6 +15,20 @@ CloudFront serves the app and `/api/*` from one URL, so the app calls relative p
 Flow: Home → search → results slide in from the right → school list | draggable divider | chat →
 Compare modal.
 
+Animation uses [Motion](https://motion.dev) (`motion/react`), the library MagicUI's components are
+built on. MagicUI itself needs Tailwind, and this app uses plain CSS. Motion is used where it shows
+what changed after a parent acts:
+- cards come in one after another, and slide to their new place when a chip edit changes the results
+- chips grow in and shrink out
+- the heart pops when a school is saved
+- the drawer, the compare window and My list animate both open and closed
+- chat replies slide in
+- the phone tabs' highlight slides between Schools and Chat
+
+The one effect that isn't a reply to an action is a single shine across each "Best for" ribbon when
+results land. `MotionConfig reducedMotion="user"` turns movement off for anyone whose device asks
+for reduced motion.
+
 ## How it uses the API
 
 - `src/api.js`: every agent turn goes through `POST /api/turn/stream`. Progress events show in the
