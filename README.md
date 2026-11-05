@@ -148,6 +148,20 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvi
 
 Try it from the command line without the API: `PYTHONPATH=. ../.venv/bin/python scripts/try_agent.py "middle school near Miami with STEM, I work until 6"`
 
+## CI/CD
+
+GitHub Actions (decision 039). No AWS keys are stored in GitHub; workflows sign in with OIDC.
+
+| Workflow | When | What |
+|---|---|---|
+| `ci.yml` | every pull request | agent unit tests, frontend build, `cdk synth` |
+| `evals.yml` | pull requests that change `agent/` or `evals/` | the 38 evals on Bedrock; results posted on the PR; fails below 36 passes |
+| `deploy.yml` | every merge to `main`, or "Run workflow" | CI, then `cdk deploy GsDataStack GsAppStack`, then the live smoke test |
+
+One-time setup, from `infra/`: `cdk deploy GsCiStack` creates the GitHub OIDC trust and the two
+roles. To deploy to another account, deploy GsCiStack there and change `AWS_ROLE` (and
+`KNOWLEDGE_BASE_ID`) in the workflows.
+
 ## Evaluation
 
 `evals/cases.json` holds 38 parent queries across core searches, missing information, honesty,
