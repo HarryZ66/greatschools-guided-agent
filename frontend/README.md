@@ -30,7 +30,7 @@ Compare modal.
     criteria below, amber with "⚠ check data" when the school has `quality_flags`), a heart to save, and one line per
     criterion with its status (Yes / Partly / Watch out / Not known) and the plain-language note.
     Then "Good to know" (`watch_out`), cost (after-aid amounts always marked as estimates), "See
-    details and reviews" and Compare. A turn without results keeps the current cards.
+    fit, programs and reviews" and Compare. A turn without results keeps the current cards.
   - `program_results`: program cards under the schools, in miles, plus the names of programs
     skipped because their sessions already ended.
   - `text`, `evidence_callout` and `clarifying_question`: one chat reply. Question options are
@@ -38,9 +38,11 @@ Compare modal.
   - `comparison`: the Compare modal (pick 2 schools, then "Compare schools"). The reply in the chat
     carries the summary and an "Open the comparison table" link.
   - `trace` and `turn`: under each reply, "How I checked this" and "Helpful? 👍 👎" (rates that reply).
-- "See details and reviews" opens a side panel with the verified profile (P3): ratings, the same
-  checks as the card, dated parent quotes (older ones marked), data problems and plain meanings of
-  terms on the page.
+- Clicking a school card, its name or "See fit, programs and reviews" opens a side panel led by
+  "How it fits": confirmed checks, then gaps with matching nearby programs grouped by need.
+  Programs show why they could help, schedule, cost and distance. No match, unavailable lookup
+  and no active search needs each have their own message. The panel also shows ratings, dated
+  parent quotes (older ones marked), data problems and plain meanings of terms on the page.
 - The heart saves a school; "♥ My list" in the header lists saved schools. Saving shows the nearby
   programs `/api/saved` returns for that school's gaps.
 - The home page offers three example searches for parents who don't know what to ask.

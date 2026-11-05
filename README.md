@@ -141,7 +141,7 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvi
 | `POST /api/turn/stream` | Same, as server-sent events: progress while the agent works, then the result |
 | `POST /api/saved`, `GET /api/saved?session_id=`, `DELETE /api/saved/{school_id}?session_id=` | Saved list; saving returns programs that fill that school's gaps |
 | `POST /api/feedback` | Thumbs up/down on a result |
-| `GET /api/schools/{school_id}?session_id=` | School record plus a verified profile: checks, review counts, guide terms, cost after aid |
+| `GET /api/schools/{school_id}?session_id=` | School record plus a verified profile: fit checks, programs for gaps, review counts, guide terms, cost after aid |
 | `GET /api/metrics` | Saves-to-searches, thumbs relevance, criteria per search |
 | `GET /api/health` | Health check |
 
@@ -183,7 +183,7 @@ Load test against the deployed URL: 8 parents searching at the same moment all g
 Other tests:
 
 ```bash
-cd agent && ../.venv/bin/pytest -q tests                  # 98 offline tests, including AgentCore, Gateway, knowledge-base citations and saved-search integration
+cd agent && ../.venv/bin/pytest -q tests                  # 107 offline tests, including AgentCore, Gateway, school fit and program matching
 python3 evals/smoke_api.py https://<cloudfront-domain>    # 26 end-to-end API checks against a deployment, including streaming
 python3 agent/scripts/check_front_door.py                # the agent runtime rejects calls without an OAuth token
 python3 agent/scripts/gateway_tools_demo.py              # lists the Gateway's MCP tools and calls one
