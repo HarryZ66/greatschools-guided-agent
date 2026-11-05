@@ -9,8 +9,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Model tiers (decision 034): most turns on the fast model, sensitive or failed ones on the strong one.
 FAST_MODEL = os.environ.get("FAST_MODEL", "us.anthropic.claude-haiku-5-5")
 STRONG_MODEL = os.environ.get("STRONG_MODEL", "us.anthropic.claude-sonnet-5-5")
-# Set MAIN_MODEL to run every turn on one model (the evals use it to compare models).
-MAIN_MODEL = os.environ.get("MAIN_MODEL") or None
+# Every turn runs on Claude Sonnet 5.5 (decision 040). MAIN_MODEL pins one model for every turn;
+# set it to an empty string to use the tiers above instead (decision 034).
+MAIN_MODEL = os.environ.get("MAIN_MODEL", "us.anthropic.claude-sonnet-5-5") or None
 EMBED_MODEL = "amazon.titan-embed-text-v2:0"
 EMBED_DIMS = 1024
 SCHOOLS_INDEX = "schools"

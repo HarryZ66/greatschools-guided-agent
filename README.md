@@ -25,7 +25,7 @@ GreatSchools left these open (see the tech brief). Reasons are in [`docs/decisio
 | Area | Our choice |
 |---|---|
 | Language | Python for the agent, API, data scripts and infrastructure; React for the parent app |
-| Model | Claude Haiku 5.5 on Bedrock for most turns; code sends turns on sensitive topics, and any turn Haiku can't finish, to Claude Sonnet 5.5 (decision 034). Prompt caching on both. Titan Text Embeddings v2 for semantic search |
+| Model | Claude Sonnet 5.5 on Bedrock for every turn (decision 040), with prompt caching. Set `MAIN_MODEL` to an empty string for the cheaper tiers: Haiku 5.5 for most turns, Sonnet 5.5 for sensitive or failed ones (decision 034). Titan Text Embeddings v2 for semantic search |
 | How agentic | A guided agent. The model picks its tools (school search, school profile, find by name, parent guide, programs), asks at most one question per turn, spots gaps and suggests needs. Code decides every status, score, trade-off and piece of evidence. At most 6 tool calls per turn |
 | Agent framework | Strands Agents |
 | Compute | The agent runs on Amazon Bedrock AgentCore Runtime, one session per conversation (decision 025). The public API is one ARM64 Fargate task behind an ALB, reached only through CloudFront and AWS WAF |
@@ -172,7 +172,7 @@ extraction, questions, refusals, and that every school the agent names was retur
 AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 .venv/bin/python evals/run_evals.py
 ```
 
-Latest run, Haiku 5.5 with Sonnet 5.5 for sensitive and failed turns (decision 034; full table in
+Run with the tiers, Haiku 5.5 with Sonnet 5.5 for sensitive and failed turns (decision 034; the app now uses Sonnet 5.5 for every turn, decision 040, and CI posts each PR's run; table in
 [`evals/results/latest.md`](evals/results/latest.md)):
 
 | Metric | Result |

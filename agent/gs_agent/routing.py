@@ -5,7 +5,8 @@ Most turns run on the fast model (Claude Haiku 5.5). Code sends a turn to the st
 sorting schools by who the students are (fair housing, decision 007), or a child's disability.
 The choice is made in code, before any model reads the turn, so it costs nothing and can't be
 talked out of by the message itself. A turn the fast model fails is retried on the strong one
-(agent.py). Setting MAIN_MODEL pins every turn to one model, which is how the evals compare models.
+(agent.py). MAIN_MODEL pins every turn to one model: by default Sonnet 5.5 (decision 040), so the
+tiers apply only when MAIN_MODEL is set to an empty string. The evals use it to compare models.
 """
 
 import re

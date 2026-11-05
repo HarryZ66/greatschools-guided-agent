@@ -566,3 +566,18 @@ local branches could undo each other (it happened twice during the hackathon).
   about $2 a day each and 10-15 minutes per deploy), and separate AWS accounts per environment,
   which is what GreatSchools' multi-account setup would use in production. Branch protection
   ("PRs must pass CI") needs a repo admin to turn on.
+
+## 040: Every turn runs on Claude Sonnet 5.5
+
+The team chose to run every agent turn on Claude Sonnet 5.5. `MAIN_MODEL` now defaults to
+`us.anthropic.claude-sonnet-5-5`, which pins every turn to it, locally, in the evals and in the
+deployed app.
+
+- The tiers from decision 034 stay in the code. Setting `MAIN_MODEL` to an empty string brings
+  them back (Haiku 5.5 for most turns, Sonnet 5.5 for sensitive or failed ones); the unit tests
+  run that way so the routing stays covered.
+- The fast path and the shared first-turn cache (decision 036) still apply: plain searches and
+  repeated first questions don't reach a model at all.
+- Cost: our evals measured about $0.017 per turn with Sonnet on every turn, against about $0.0033
+  with the tiers (list prices). At GreatSchools' traffic that difference is large, so this is the
+  setting to revisit before production.
