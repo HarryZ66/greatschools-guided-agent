@@ -259,7 +259,8 @@ again with its `mode` and `value` turns it back on.
 `profile` (decision 042) is the family profile the agent's questions fill in, computed by code:
 `{"topics": [{"id": "learning", "label": "How your child learns", "done": true}, ...], "done": 2, "total": 6}`.
 Topics: `learning`, `schedule`, `wellbeing`, `academics`, `interests`, `budget`. A topic is done when
-one of its needs is set or the parent answered a question about it. Show it as a small meter.
+one of its needs is set or the parent answered a question about it. The app doesn't show it
+(decision 043); it decides which question the agent asks next.
 
 ### `clarifying_question`
 

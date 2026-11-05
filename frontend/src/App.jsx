@@ -157,8 +157,7 @@ function ChipMenu({ c, anchor, onMove, onOff, onClose }) {
 function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
   const [menu, setMenu] = useState(null)
   if (!block) return null
-  const { chips = [], unmapped = [], suggested = [], profile } = block
-  const next = profile?.topics.find(t => !t.done)
+  const { chips = [], unmapped = [], suggested = [] } = block
   const offList = [...off.values()].filter(o => !chips.some(c => c.need === o.need))
   const menuChip = chips.find(c => c.need === menu?.need)
   const flow = []
@@ -194,18 +193,6 @@ function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
   }
   return (
     <div className="buckets">
-      {/* The family profile the agent's questions fill in, one topic at a time (decision 042) */}
-      {profile && (
-        <div className="profile" aria-label={`Your family profile: ${profile.done} of ${profile.total} topics known`}>
-          <span className="lbl">Your family profile</span>
-          <span className="segs" aria-hidden="true">
-            {profile.topics.map(t => <motion.i key={t.id} title={t.label} className={t.done ? 'on' : ''} initial={false}
-              animate={{ scaleY: t.done ? 1 : 0.6 }} transition={spring} />)}
-          </span>
-          <span className="hint">{profile.done === profile.total ? 'Complete' : `${profile.done} of ${profile.total}`}
-            {next && <> · next: {next.label.toLowerCase()}</>}</span>
-        </div>
-      )}
       {/* The menu goes on the page body: the sticky header's blur would offset a fixed position */}
       {createPortal(<AnimatePresence>{menuChip && !busy && <ChipMenu key={menuChip.need} c={menuChip} anchor={menu.el}
         onMove={onMove} onOff={onOff} onClose={() => setMenu(null)} />}</AnimatePresence>, document.body)}

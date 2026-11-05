@@ -639,3 +639,12 @@ well, but parents rarely know they exist, so the journey ended at "Saved".
   (email or the partner's own system). Contact goes through the signed-in parent's account, so the
   form asks for no phone number or email.
 - `turn_cache.VERSION` is now 2, so first-turn answers cached before this change aren't reused.
+
+## 043: The family profile isn't shown in the app
+
+The small "Your family profile" meter above the chips (decision 042) read as one more control to
+figure out, on a screen that should feel like a simple search. Parents already see the profile
+fill in through the questions the agent asks.
+
+- The app no longer draws the meter. `profile` stays in `search_summary` and code still tracks the
+  topics, so the agent keeps asking one question at a time until it knows the family.
