@@ -125,7 +125,23 @@ Saving and feedback skip the agent entirely:
 - `GET /api/schools/{school_id}?session_id=…`: the school record plus a verified `profile` (P3):
   `criteria` (that session's needs, same rules as the cards), `quality_flags`, `reviews`
   (`by_topic` recent/older counts, up to 3 dated `excerpts` marked `older` past 3 years, `total`),
-  `terms` (guide entries that explain fields on the page) and `cost`. No model call.
+  `terms` (guide entries that explain fields on the page) and `cost`. It also includes `programs`
+  (same fields as the saved-school suggestions, including `fills_need` and `why`) and
+  `programs_status` (`ready` after matching, or `unavailable` when program lookup failed).
+  Opening a school does not save it. No conversational model call.
+  - Show "How it fits" first, with confirmed checks followed by the other checks and their
+    evidence notes. Put each program under its `fills_need`, so suggestions are specific to
+    this school and the parent's current needs. Offer at most one distinct program per gap.
+  - Programs can help with supported needs (care, STEM, counseling support, arts, college prep,
+    English classes and sports); they do not fix every mismatch. Never recommend an activity
+    the parent wants to avoid. A care suggestion must cover the gap in every displayed session.
+  - Keep `missing` and stale school information visibly uncertain. A program suggestion never
+    changes the school's criterion status. Show program schedule, cost and distance, and remind
+    parents to check availability, eligibility and travel.
+  - With `programs_status: ready` and no match for a need, say there is no suitable suggestion
+    yet. With `unavailable`, keep the school's checks visible and explain that program lookup
+    failed. Without session needs, return empty `criteria` and `programs`; ask the parent to
+    describe their needs instead of claiming a perfect fit.
 - `GET /api/metrics`: `{searches, saves, saves_to_searches, thumbs_up, thumbs_down, relevance, criteria_per_search}`
 
 `new_search` also clears guide citation history, including knowledge-base document names, so a

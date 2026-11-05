@@ -44,7 +44,7 @@ for reduced motion.
     on a phone). Each card has a school-type tag (Public / Charter / Private), a heart to save, the
     name (opens the details panel), city and cost (after-aid amounts always marked as estimates),
     the school's one `badge` ("Best for ...", if it has one), "Good to know" (`watch_out`, two
-    lines) and Compare. No rank numbers and no "% fit": the per-need checklist (Yes / Partly /
+    lines) and Compare; the whole card, or "See fit, programs and reviews", opens the details panel. No rank numbers and no "% fit": the per-need checklist (Yes / Partly /
     Watch out / Not known) is in the details panel, with the badge's reason. A turn without
     results keeps the current cards.
   - `program_results`: program cards under the schools, in miles, plus the names of programs
@@ -57,9 +57,11 @@ for reduced motion.
   - `comparison`: the Compare modal (pick 2 schools, then "Compare schools"). The reply in the chat
     carries the summary and an "Open the comparison table" link.
   - `trace` and `turn`: under each reply, "How I checked this" and "Helpful? 👍 👎" (rates that reply).
-- "See details and reviews" opens a side panel with the verified profile (P3): ratings, the same
-  checks as the card, dated parent quotes (older ones marked), data problems and plain meanings of
-  terms on the page.
+- Clicking a school card, its name or "See fit, programs and reviews" opens a side panel led by
+  "How it fits": confirmed checks, then gaps with matching nearby programs grouped by need.
+  Programs show why they could help, schedule, cost and distance. No match, unavailable lookup
+  and no active search needs each have their own message. The panel also shows ratings, dated
+  parent quotes (older ones marked), data problems and plain meanings of terms on the page.
 - The heart saves a school; "♥ My list" in the header lists saved schools. Saving shows the nearby
   programs `/api/saved` returns for that school's gaps.
 - The home page offers three example searches for parents who don't know what to ask.

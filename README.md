@@ -142,7 +142,7 @@ AWS_PROFILE=<profile> AWS_DEFAULT_REGION=us-east-1 PYTHONPATH=. ../.venv/bin/uvi
 | `POST /api/turn/stream` | Same, as server-sent events: progress while the agent works, then the result |
 | `POST /api/saved`, `GET /api/saved?session_id=`, `DELETE /api/saved/{school_id}?session_id=` | Saved list; saving returns programs that fill that school's gaps |
 | `POST /api/feedback` | Thumbs up/down on a result |
-| `GET /api/schools/{school_id}?session_id=` | School record plus a verified profile: checks, review counts, guide terms, cost after aid |
+| `GET /api/schools/{school_id}?session_id=` | School record plus a verified profile: fit checks, programs for gaps, review counts, guide terms, cost after aid |
 | `GET /api/metrics` | Saves-to-searches, thumbs relevance, criteria per search |
 | `GET /api/health` | Health check |
 

@@ -174,7 +174,9 @@ function Badge({ badge, full }) {
 // when a search changes, the ones that stay slide to their new place.
 const SchoolCard = forwardRef(function SchoolCard({ r, i, deps, checked, onToggle, saved, onSave, onDetails }, ref) {
   return (
-    <motion.article ref={ref} className={'card school' + (checked ? ' sel' : '')} style={{ '--d': `${0.5 + step(i)}s` }}
+    // The whole card opens the details panel, except its own buttons and the Compare box (PR #20)
+    <motion.article ref={ref} className={'card school school-card' + (checked ? ' sel' : '')} style={{ '--d': `${0.5 + step(i)}s` }}
+      onClick={e => { if (!e.target.closest('button, a, input, label')) onDetails(r) }}
       layout="position" layoutDependency={deps} transition={spring}
       initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1, transition: { ...soft, delay: step(i) } }}
       exit={{ opacity: 0, scale: 0.94, transition: { duration: 0.18 } }}>
@@ -188,7 +190,7 @@ const SchoolCard = forwardRef(function SchoolCard({ r, i, deps, checked, onToggl
       <Badge badge={r.badge} />
       {r.watch_out && <p className="watch" title={r.watch_out}><b>Good to know:</b> {r.watch_out}</p>}
       <footer className="card-foot">
-        <button className="link" onClick={() => onDetails(r)}>See details and reviews</button>
+        <button className="link" onClick={() => onDetails(r)}>See fit, programs and reviews</button>
         <label className={'cmp' + (checked ? ' on' : '')}>
           <input type="checkbox" checked={checked} onChange={() => onToggle(r.school_id)} />
           <span>{checked ? 'Comparing' : 'Compare'}</span>
@@ -252,11 +254,50 @@ function CompareModal({ data, labels, onClose }) {
   )
 }
 
+function SchoolFit({ profile, labels }) {
+  const criteria = profile.criteria || []
+  const confirmed = criteria.filter(c => c.status === 'confirmed')
+  const gaps = criteria.filter(c => c.status !== 'confirmed')
+  return (
+    <section className="school-fit" aria-label="How it fits">
+      <h4>How it fits</h4>
+      {!criteria.length ? <p className="meta">Tell us what matters to your family in the search to see this school’s fit and nearby programs.</p> : <>
+        <p className="meta">{confirmed.length} of {criteria.length} needs confirmed for this school.</p>
+        {confirmed.length > 0 && <Checks criteria={confirmed} labels={labels} />}
+        {gaps.length > 0 && <>
+          <h4>Where you may need extra support</h4>
+          <p className="meta">Nearby programs may help with some gaps. Missing or older school information still needs checking with the school.</p>
+          {gaps.map(c => {
+            const matches = (profile.programs || []).filter(p => p.fills_need === c.need)
+            return <div className="fit-gap" key={c.need}>
+              <Checks criteria={[c]} labels={labels} />
+              {matches.length > 0 ? <>
+                <p className="program-label">A nearby option that could help</p>
+                {matches.map(p => <ProgramCard key={p.program_id} p={p} />)}
+              </> : <p className="meta gap-empty">{profile.programs_status !== 'ready'
+                ? 'We couldn’t check nearby programs. Try opening this school again.'
+                : 'No suitable program to suggest for this need yet. Ask the school about your options.'}</p>}
+            </div>
+          })}
+          {(profile.programs || []).length > 0 && <p className="meta">Check availability, eligibility and travel between the school and program before making plans.</p>}
+        </>}
+      </>}
+    </section>
+  )
+}
+
 // P3: the verified profile for one school, built by the backend's code for this parent's needs.
 function Details({ school, sessionId, labels, saved, onSave, onClose }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
-  useEffect(() => { getSchool(sessionId, school.school_id).then(setData).catch(e => setError(e.message)) }, [sessionId, school.school_id])
+  useEffect(() => {
+    let active = true
+    setData(null); setError(null)
+    getSchool(sessionId, school.school_id)
+      .then(result => { if (active) setData(result) })
+      .catch(e => { if (active) setError(e.message) })
+    return () => { active = false }
+  }, [sessionId, school.school_id])
   useEffect(() => { const f = e => e.key === 'Escape' && onClose(); window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f) }, [onClose])
   const p = data?.profile
   const flagged = new Set((p?.quality_flags || []).map(f => f.field))
@@ -280,9 +321,10 @@ function Details({ school, sessionId, labels, saved, onSave, onClose }) {
         {error && <p className="watch">I couldn’t load this school: {error}</p>}
         {!data && !error && <div className="skel-lines" aria-label="Loading"><i /><i /><i /><i /></div>}
         {p && <motion.div initial="hidden" animate="show" variants={stagger(0.06)}>
+          <motion.div variants={rise}><SchoolFit profile={p} labels={labels} /></motion.div>
+          <motion.h4 variants={rise}>School details</motion.h4>
           {facts.length > 0 && <motion.dl className="facts" variants={rise}>{facts.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</motion.dl>}
           {p.cost && <motion.p className="meta" variants={rise}><Cost cost={p.cost} /></motion.p>}
-          {p.criteria?.length > 0 && <motion.section variants={rise}><h4>How it fits what you asked for</h4><Checks criteria={p.criteria} labels={labels} /></motion.section>}
           <motion.section variants={rise}>
             <h4>What parents say</h4>
             {p.reviews?.total ? <>
