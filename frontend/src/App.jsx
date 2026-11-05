@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useId, forwardRef } from 
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence, MotionConfig } from 'motion/react'
 import logo from './assets/greatschools-logo.png'
+import { Terms } from './Glossary.jsx'
 import { turn, saveSchool, unsaveSchool, rateReply, getSchool, getPartners, requestVisit, listVisits } from './api.js'
 
 // Statuses are decided by the backend's code (docs/contract.md, section 2); we only word them.
@@ -15,7 +16,7 @@ const status = s => STATUS[s] || STATUS.missing
 const TYPE = { public: 'Public', charter: 'Charter', private: 'Private' }
 const FIXED_NEEDS = new Set(['grade_level', 'location'])  // always required; change them by searching again
 const EXAMPLES = [
-  'Middle school near Miami with STEM. I work until 6pm',
+  'Middle school near Miami for a kid who loves science and robotics. I work until 6pm',
   'Free elementary school in Hialeah with help learning English',
   'My son has ADHD and needs extra help in class. High school near Doral',
 ]
@@ -107,7 +108,7 @@ function Checks({ criteria, labels }) {
         return (
           <motion.li key={c.need} className={st.cls} variants={rise}>
             <span className="ic" aria-hidden="true">{st.icon}</span>
-            <span><b>{labels[c.need] || humanize(c.need)}</b> <em>{st.word}</em>{c.note && <small>{c.note}</small>}</span>
+            <span><b><Terms text={labels[c.need] || humanize(c.need)} /></b> <em>{st.word}</em>{c.note && <small><Terms text={c.note} /></small>}</span>
           </motion.li>
         )
       })}
@@ -171,10 +172,10 @@ function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
         <motion.span key={c.need} layout="position" {...pop}
           className={'chip ' + c.mode + (c.source === 'inferred' ? ' inferred' : '') + (fixed ? ' fixed' : '')}
           title={fixed ? 'Search again to change this' : c.source === 'inferred' ? 'I assumed this. Change it if it’s wrong.' : undefined}>
-          {fixed ? <span className="clabel">{c.label}</span> : (
+          {fixed ? <span className="clabel"><Terms text={c.label} /></span> : (
             <button className="clabel" disabled={busy} aria-haspopup="menu" aria-expanded={menu?.need === c.need}
               onClick={e => { const el = e.currentTarget.parentElement; setMenu(m => m?.need === c.need ? null : { need: c.need, el }) }}>
-              {c.label}<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M3 4.5l3 3 3-3" /></svg>
+              <Terms text={c.label} inert /><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M3 4.5l3 3 3-3" /></svg>
             </button>
           )}
           {!fixed && <button className="chipx" disabled={busy} onClick={() => onOff(c)} aria-label={`Turn off ${c.label}`} title="Turn off">×</button>}
@@ -188,7 +189,7 @@ function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
     flow.push(
       <motion.button key={o.need} layout="position" {...pop} whileTap={{ scale: 0.94 }} className="chip off" disabled={busy}
         onClick={() => onOn(o)} title="Turned off. Tap to turn it back on" aria-label={`Turn ${o.label} back on`}>
-        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 6.5h6a3 3 0 010 6H7M3.5 6.5L6 4M3.5 6.5L6 9" /></svg>{o.label}
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 6.5h6a3 3 0 010 6H7M3.5 6.5L6 4M3.5 6.5L6 9" /></svg><Terms text={o.label} inert />
       </motion.button>)
   }
   return (
@@ -205,7 +206,7 @@ function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
           <AnimatePresence initial={false} mode="popLayout">
             {suggested.map(s => (
               <motion.button key={s.need} layout="position" {...pop} whileTap={{ scale: 0.94 }} className="chip suggested" disabled={busy} title={s.why}
-                onClick={() => onAdd(s)}>+ {s.label}</motion.button>
+                onClick={() => onAdd(s)}>+ <Terms text={s.label} inert /></motion.button>
             ))}
           </AnimatePresence>
         </div>
@@ -214,7 +215,7 @@ function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
   )
 }
 
-const TypeTag = ({ type }) => <span className={'type t-' + type}>{TYPE[type] || humanize(type)}</span>
+const TypeTag = ({ type }) => <span className={'type t-' + type}><Terms text={TYPE[type] || humanize(type)} /></span>
 
 const Rosette = () => (
   <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" className="rosette">
@@ -231,7 +232,7 @@ function Badge({ badge, full }) {
     <p className={'badge' + (full ? ' full' : '')} title={full ? undefined : badge.why}>
       <span className="ribbon">
         <Rosette />
-        <span><b>{badge.label}</b>{full && <small>{badge.why}</small>}</span>
+        <span><b><Terms text={badge.label} /></b>{full && <small><Terms text={badge.why} /></small>}</span>
         {!full && <i className="shine" aria-hidden="true" />}
       </span>
     </p>
@@ -257,7 +258,7 @@ const SchoolCard = forwardRef(function SchoolCard({ r, i, deps, checked, onToggl
       <p className="place"><Pin />{r.city}</p>
       {r.cost && <p className="meta cost"><Cost cost={r.cost} /></p>}
       <Badge badge={r.badge} />
-      {r.watch_out && <p className="watch" title={r.watch_out}><b>Good to know:</b> {r.watch_out}</p>}
+      {r.watch_out && <p className="watch" title={r.watch_out}><b>Good to know:</b> <Terms text={r.watch_out} /></p>}
       <footer className="card-foot">
         <button className="link" onClick={() => onDetails(r)}>See fit, programs and reviews</button>
         <label className={'cmp' + (checked ? ' on' : '')}>
@@ -289,8 +290,8 @@ function ProgramCard({ p, i = 0 }) {
       <p className="meta">{p.organization} · {p.city}{mi != null && p.near ? ` · ${mi} miles from ${p.near}` : ''}</p>
       <p className="meta">{[p.ages, p.cost, p.meets_on?.length ? `Meets ${p.meets_on.join(', ')}` : null,
         next ? `Next: ${day(next.date)} · ${clock(next.start)}–${clock(next.end)}` : null, p.registration_open ? 'Sign-up open' : null].filter(Boolean).join(' · ')}</p>
-      {p.why && <p className="why">{p.why}</p>}
-      {p.time_fit && <p className={'fit ' + status(p.time_fit.status).cls}>{status(p.time_fit.status).icon} {p.time_fit.note}</p>}
+      {p.why && <p className="why"><Terms text={p.why} /></p>}
+      {p.time_fit && <p className={'fit ' + status(p.time_fit.status).cls}>{status(p.time_fit.status).icon} <Terms text={p.time_fit.note} /></p>}
       {p.quality_flags?.length > 0 && <p className="watch"><b>Good to know:</b> {p.quality_flags.map(f => f.note).join(' ')}</p>}
     </motion.article>
   )
@@ -306,16 +307,16 @@ function CompareModal({ data, labels, onClose }) {
         initial={{ opacity: 0, y: 28, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.98 }} transition={spring}>
         <button className="x" onClick={onClose} aria-label="Close">×</button>
         <h2>Compare schools</h2>
-        {data.summary && <p className="summary">{data.summary}</p>}
+        {data.summary && <p className="summary"><Terms text={data.summary} /></p>}
         <div className="tw"><table>
           <thead><tr><th />{(data.names || data.school_ids).map(n => <th key={n}>{n}</th>)}</tr></thead>
           <motion.tbody initial="hidden" animate="show" variants={stagger(0.04, 0.12)}>{data.rows.map(row => (
-            <motion.tr key={row.need} variants={rise}><th>{labels[row.need] || row.label || humanize(row.need)}</th>{row.cells.map((c, i) => {
+            <motion.tr key={row.need} variants={rise}><th><Terms text={labels[row.need] || row.label || humanize(row.need)} /></th>{row.cells.map((c, i) => {
               const st = status(c.status)
               // "No problems found" needs no badge; everything else shows the check's status.
               return <td key={i} className={st.cls}>{row.need === 'data_quality' && c.status === 'confirmed'
-                ? <span className="none">{c.text}</span>
-                : <><span className="ic">{st.icon}</span> <em>{st.word}</em><small>{c.text}</small></>}</td>
+                ? <span className="none"><Terms text={c.text} /></span>
+                : <><span className="ic">{st.icon}</span> <em>{st.word}</em><small><Terms text={c.text} /></small></>}</td>
             })}</motion.tr>))}</motion.tbody>
         </table></div>
       </motion.div>
@@ -403,7 +404,7 @@ function Details({ school, sessionId, labels, saved, onSave, onClose }) {
               ))}
             </> : <p className="meta">No reviews yet.</p>}
           </motion.section>
-          {p.quality_flags?.length > 0 && <motion.section variants={rise}><h4>Problems in our data</h4><ul className="flags">{p.quality_flags.map(f => <li key={f.field}>{f.note}</li>)}</ul></motion.section>}
+          {p.quality_flags?.length > 0 && <motion.section variants={rise}><h4>Problems in our data</h4><ul className="flags">{p.quality_flags.map(f => <li key={f.field}><Terms text={f.note} /></li>)}</ul></motion.section>}
           {p.terms?.length > 0 && <motion.section variants={rise}><h4>Words on this page</h4>{p.terms.map(t => <details key={t.id} className="term"><summary>{t.title}</summary><p>{t.body}</p></details>)}</motion.section>}
         </motion.div>}
       </motion.aside>
@@ -577,7 +578,7 @@ function Message({ m, live, canUndo, onUndo, onOption, onVote, onOpenComparison,
     <motion.div className={'turn ' + m.r} style={{ transformOrigin: m.r === 'me' ? 'bottom right' : 'top left' }}
       initial={{ opacity: 0, y: 12, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={soft}>
       <div className={'m ' + m.r + (m.error ? ' err' : '')}>
-        {summary}
+        {ai ? <Terms text={summary} /> : summary}
         {hasMore && (
           <span className="more">
             <button className="link" aria-expanded={open} aria-controls={id} onClick={() => setOpen(o => !o)}>
@@ -595,13 +596,13 @@ function Message({ m, live, canUndo, onUndo, onOption, onVote, onOpenComparison,
           {full && (rest || notes > 0 || m.sources?.length > 0) && (
             <motion.div id={id} className="rest" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }}>
-              {rest && <div className="t">{rest}</div>}
+              {rest && <div className="t"><Terms text={rest} /></div>}
               {m.sources?.length > 0 && <small className="src">From the GreatSchools guide: {m.sources.map(s => s.document ? `${s.title} (${s.document})` : s.title).join(' · ')}</small>}
-              {m.callouts?.map((c, i) => <p key={i} className="callout"><b>{c.name}:</b> {c.text}</p>)}
+              {m.callouts?.map((c, i) => <p key={i} className="callout"><b>{c.name}:</b> <Terms text={c.text} /></p>)}
             </motion.div>
           )}
         </AnimatePresence>
-        {m.question && <p className="ask"><b>{m.question.text}</b>{full && m.question.why && <small>{m.question.why}</small>}</p>}
+        {m.question && <p className="ask"><b><Terms text={m.question.text} /></b>{full && m.question.why && <small><Terms text={m.question.why} /></small>}</p>}
         {m.comparison && <button className="link" onClick={() => onOpenComparison(m.comparison)}>Open the comparison table</button>}
         {m.programs?.length > 0 && <div className="progs">{m.programs.map((p, i) => <ProgramCard key={p.program_id} p={p} i={i} />)}</div>}
         {m.visit && <VisitOffer offer={m.visit} onPlan={onPlanVisit} />}
@@ -621,7 +622,7 @@ function Message({ m, live, canUndo, onUndo, onOption, onVote, onOpenComparison,
         {m.question && live && (
           <motion.div className="choices" initial="hidden" animate="show" exit={{ opacity: 0, transition: { duration: 0.15 } }} variants={stagger(0.05, 0.15)}>
             {m.question.options.map(o => <motion.button key={o.id} variants={rise} whileTap={{ scale: 0.95 }} disabled={busy}
-              onClick={() => onOption(m.question, o)}>{o.label}</motion.button>)}
+              onClick={() => onOption(m.question, o)}><Terms text={o.label} inert /></motion.button>)}
           </motion.div>
         )}
       </AnimatePresence>

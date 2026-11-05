@@ -57,7 +57,9 @@ about half. Families with less money rule out options without knowing help exist
 
 **What we built.** Every label, question and answer uses everyday words ("extra help with
 learning", "help learning English"). A term only appears if the parent uses it, and then it's
-explained. Parents can also ask "What is a charter school?" and get a short answer with a source.
+explained. Terms that still appear, like "Charter" or "STEM", have a dashed underline: hover or
+tap to see a one-line meaning. Parents can also ask "What is a charter school?" and get a short
+answer with a source.
 
 ## 4. Parents have no time to research
 
