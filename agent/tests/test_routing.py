@@ -103,3 +103,18 @@ def test_a_failed_fast_turn_is_retried_on_the_strong_model():
 def test_models_are_shared_between_sessions():
     assert A.bedrock_model(FAST) is A.bedrock_model(FAST)
     assert A.bedrock_model(FAST).config["model_id"] == FAST
+
+
+def test_every_turn_runs_on_sonnet_by_default(monkeypatch):
+    """Decision 040: without MAIN_MODEL set, every turn is pinned to Sonnet 5.5."""
+    import importlib
+
+    from gs_agent import config
+    monkeypatch.delenv("MAIN_MODEL", raising=False)
+    try:
+        assert importlib.reload(config).MAIN_MODEL == "us.anthropic.claude-sonnet-5-5"
+        monkeypatch.setenv("MAIN_MODEL", "")
+        assert importlib.reload(config).MAIN_MODEL is None  # empty: the tiers decide
+    finally:
+        monkeypatch.setenv("MAIN_MODEL", "")
+        importlib.reload(config)
