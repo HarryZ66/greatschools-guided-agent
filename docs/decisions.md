@@ -581,3 +581,32 @@ deployed app.
 - Cost: our evals measured about $0.017 per turn with Sonnet on every turn, against about $0.0033
   with the tiers (list prices). At GreatSchools' traffic that difference is large, so this is the
   setting to revisit before production.
+
+## 041: The agent keeps asking until it knows the family, then offers a visit with a local partner
+
+Our main idea is that the agent asks what parents don't know to ask (pain point #2). In practice it
+often stopped: comparisons were told not to ask, chip edits cleared the open question, and saves
+said nothing. GreatSchools also told us local nonprofits and partners visit schools and know them
+well, but parents rarely know they exist, so the journey ended at "Saved".
+
+- **A family profile, tracked by code** (`family.py`): six topics (how the child learns, getting
+  there and pickup, feeling safe and supported, classes, what the child enjoys, budget and school
+  type). A topic is known when one of its needs is set or the parent answered a question on it.
+  Every model turn gets a one-line note listing the topics still unknown, and the prompt says:
+  once schools are shown, end every reply with one question (a trade-off first, else the next
+  topic), with 2-4 options. The model tags the question's `topic`; code records what was asked
+  and answered, so a topic is never asked twice. The chips show the profile as a small meter.
+- **Every action keeps the conversation going.** A compare asks what would settle the choice. A
+  chip edit keeps the open question, or asks the next topic in code's words (no model call, as
+  decision 006 requires). A save does the same through `follow_up`.
+- **Visits with local partners** (`partners.py`, `content/partners.json`): when the profile is
+  complete and schools are saved, after a compare, or when the parent asks about visiting, code
+  adds a `visit_offer` with the partners serving those schools' cities. The planner lets the parent
+  pick a partner, schools, a visit or a call, a time and a language; `POST /api/visits` checks it
+  in code and stores it in DynamoDB. My list shows the request; `/api/metrics` counts
+  `visit_requests`, the step after saves-to-searches. The model never names partners.
+- **The partners are made up**, like the schools, and marked `sample`; the app says no request
+  reaches anyone. A real launch would load GreatSchools' partner list and route requests to them
+  (email or the partner's own system). Contact goes through the signed-in parent's account, so the
+  form asks for no phone number or email.
+- `turn_cache.VERSION` is now 2, so first-turn answers cached before this change aren't reused.

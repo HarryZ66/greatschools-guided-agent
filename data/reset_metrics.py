@@ -1,4 +1,4 @@
-"""Delete all searches, saves and feedback from the app table, so /api/metrics starts at zero.
+"""Delete all searches, saves, feedback and visit requests from the app table, so /api/metrics starts at zero.
 
 Run it right before a demo: test runs create searches without saves and skew saves-to-searches.
 
@@ -27,12 +27,12 @@ def main() -> None:
     while True:
         page = table.scan(**kwargs)
         keys += [{"pk": i["pk"], "sk": i["sk"]} for i in page["Items"]
-                 if i["sk"].startswith(("SEARCH#", "SAVED#", "FEEDBACK#"))]
+                 if i["sk"].startswith(("SEARCH#", "SAVED#", "FEEDBACK#", "VISIT#"))]
         if "LastEvaluatedKey" not in page:
             break
         kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
-    counts = {p: sum(k["sk"].startswith(p) for k in keys) for p in ("SEARCH#", "SAVED#", "FEEDBACK#")}
+    counts = {p: sum(k["sk"].startswith(p) for k in keys) for p in ("SEARCH#", "SAVED#", "FEEDBACK#", "VISIT#")}
     print(f"Table {name}: {counts}", file=sys.stderr)
     if not args.yes:
         print("Dry run. Pass --yes to delete.", file=sys.stderr)

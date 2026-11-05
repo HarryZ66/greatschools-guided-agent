@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import memory, profile, programs, search, store
+from . import memory, partners, profile, programs, search, store
 from . import runtime_client as rc
 from .agent import GuidedSession
 
@@ -100,6 +100,17 @@ class TurnRequest(BaseModel):
 class SaveRequest(BaseModel):
     session_id: str
     school_id: str
+
+
+class VisitRequest(BaseModel):
+    """A visit or call with a local partner, for schools the parent is weighing (decision 041)."""
+    session_id: str
+    partner_id: str
+    school_ids: list[str]
+    way: Literal["visit", "call"]
+    when: str
+    language: str
+    note: str | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -303,7 +314,19 @@ def save(request: SaveRequest) -> dict:
             pairs = programs.for_school(request.school_id, school, session.needs)
         except Exception:
             log.exception("could not match programs for %s", request.school_id)
-    return {"saved": store.saved_schools(request.session_id), "programs": pairs}
+    # The agent keeps going (decision 041): the next profile question, or a visit offer. Code only.
+    follow_up = []
+    if session:
+        try:
+            with _locks[session.session_id]:
+                follow_up = session.after_save()
+                if follow_up:
+                    memory.save(session.session_id, {"conversation": session.snapshot(),
+                                                     "turn": getattr(session, "turn_count", 0),
+                                                     "usage": session.usage, "usage_by_model": session.usage_by_model})
+        except Exception:
+            log.exception("could not build the follow-up after saving %s", request.school_id)
+    return {"saved": store.saved_schools(request.session_id), "programs": pairs, "follow_up": follow_up}
 
 
 @app.get("/api/saved")
@@ -322,6 +345,41 @@ def unsave(school_id: str, session_id: str) -> dict:
     if session_id in _sessions:
         _sessions[session_id].saved.discard(school_id)
     return {"saved": store.saved_schools(session_id)}
+
+
+def _schools_with_city(school_ids: list[str]) -> list[dict]:
+    schools = []
+    for sid in dict.fromkeys(school_ids[:6]):
+        if (school := search.get_school(sid)) is not None:
+            schools.append({"school_id": sid, "name": school.get("name"), "city": school.get("city")})
+    return schools
+
+
+@app.get("/api/partners")
+def list_partners(session_id: str, school_ids: str | None = None) -> dict:
+    """Local partners for these schools (comma-separated), or for the saved list. Code only."""
+    ids = [i for i in (school_ids or "").split(",") if i] or [s["school_id"] for s in store.saved_schools(session_id)]
+    schools = _schools_with_city(ids)
+    return {"schools": [{"school_id": s["school_id"], "name": s["name"]} for s in schools],
+            "partners": partners.for_schools(schools), "ways": partners.WAYS, "times": list(partners.TIMES),
+            "requests": store.visits(session_id)}
+
+
+@app.post("/api/visits")
+def request_visit(request: VisitRequest) -> dict:
+    schools = _schools_with_city(request.school_ids)
+    try:
+        record = partners.build_request(request.partner_id, schools, request.way, request.when, request.language,
+                                        request.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    store.save_visit(request.session_id, record)
+    return {"request": record, "requests": store.visits(request.session_id)}
+
+
+@app.get("/api/visits")
+def list_visits(session_id: str) -> dict:
+    return {"requests": store.visits(session_id)}
 
 
 @app.post("/api/feedback")

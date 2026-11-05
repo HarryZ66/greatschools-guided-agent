@@ -112,10 +112,13 @@ from a search that ran this turn (never an earlier one) or the comparison table,
 
 Saving and feedback skip the agent entirely:
 
-- `POST /api/saved`: `{session_id, school_id}` → `{saved: [...], programs: [...]}`. `programs` (at most
+- `POST /api/saved`: `{session_id, school_id}` → `{saved: [...], programs: [...], follow_up: [...]}`. `programs` (at most
   3) are library or community programs near that school that cover one of the parent's needs it
   doesn't fully meet; each has the `program_results` fields plus `fills_need` and a code-written `why`
   ("Care at Tamarind Cove ends at 5:00 PM. After-School Homework Help … runs 3:30 PM–6:00 PM …").
+  `follow_up` (decision 041) holds at most one block, written by code: the next family profile
+  `clarifying_question` (when no question is open), or a `visit_offer` once the profile is complete.
+  Show it as an agent reply; answer the question with an `answer` turn as usual.
 - `GET /api/saved?session_id=…` → `{saved: [{school_id, name, at}]}`
 - `DELETE /api/saved/{school_id}?session_id=…` → `{saved: [...]}`
 - `POST /api/feedback`: `{session_id, turn, vote: "up" | "down"}` rates one agent reply ("Helpful?"
@@ -142,7 +145,19 @@ Saving and feedback skip the agent entirely:
     yet. With `unavailable`, keep the school's checks visible and explain that program lookup
     failed. Without session needs, return empty `criteria` and `programs`; ask the parent to
     describe their needs instead of claiming a perfect fit.
-- `GET /api/metrics`: `{searches, saves, saves_to_searches, thumbs_up, thumbs_down, relevance, criteria_per_search}`
+- `GET /api/partners?session_id=…&school_ids=a,b` (decision 041): local partners who serve those
+  schools' cities (without `school_ids`, the saved list's). → `{schools: [{school_id, name}],
+  partners: [{partner_id, name, kind, what, cities, languages, ways, reply_days, cost, schools, sample}],
+  ways: {visit: "Visit schools with a guide", call: "Talk with a guide first"}, times: [...], requests: [...]}`.
+  Partners covering more of the schools come first. `sample: true`: the demo's partners are made up.
+- `POST /api/visits`: `{session_id, partner_id, school_ids, way: "visit" | "call", when, language, note?}`
+  → `{request, requests}`. Code checks the partner serves at least one of the schools (others are
+  dropped), offers that `way` and `language`, and that `when` is one of `times`; otherwise 400 with
+  a `detail` for the parent. `request`: `{request_id, partner_id, partner_name, way, way_label, when,
+  language, schools, note, status: "sent", reply_by (ISO date, the partner's reply_days in business
+  days), sample}`. Stored in DynamoDB; nothing is sent to anyone in the demo.
+- `GET /api/visits?session_id=…` → `{requests: [...]}`, oldest first. Show them in My list.
+- `GET /api/metrics`: `{searches, saves, saves_to_searches, thumbs_up, thumbs_down, relevance, criteria_per_search, visit_requests}`
 
 `new_search` also clears guide citation history, including knowledge-base document names, so a
 fresh conversation only cites documents retrieved in that conversation. It keeps the existing
@@ -154,7 +169,8 @@ In the deployed app, agent turns, saves and session profiles run on Amazon Bedro
 errors come back as `{"_error": {status, detail}}` and the API passes them on unchanged.
 
 A `compare` turn returns `criteria_chips` and a `comparison` block (no `school_results`);
-the comparison's `summary` is the agent's one-line take.
+the comparison's `summary` is the agent's one-line take. It also asks one question that would
+settle the choice, and carries a `visit_offer` for the two schools when a partner serves them.
 
 ## 4. Response: UI blocks
 
@@ -207,7 +223,7 @@ list; it answers "is this an agent or a chatbot?" and shows which AWS service di
 strong model took the turn), `fast_path` (a plain grade-and-place search answered in code, no model
 call), `cache` (another parent's identical first question from today, reused; the steps after it
 ran for that answer), `memory` (a new process picked the conversation up from AgentCore Memory),
-`runtime`, `new_search` or `fallback`. The `understand` step's `service` names the
+`visit_offer` (code found local partners for the schools), `runtime`, `new_search` or `fallback`. The `understand` step's `service` names the
 model that answered the turn (decision 034). `ms` is present for steps that call
 a service. Render `service` and `text` as given; new `tool` values may appear later.
 
@@ -233,6 +249,11 @@ a service. Render `service` and `text` as given; new `tool` values may appear la
 school"); show them as greyed chips. `suggested` holds up to 2 needs the parent didn't mention,
 each `{need, label, why}`; show them as tap-to-add chips that send a `chip_edit` with mode `prefer`.
 
+`profile` (decision 041) is the family profile the agent's questions fill in, computed by code:
+`{"topics": [{"id": "learning", "label": "How your child learns", "done": true}, ...], "done": 2, "total": 6}`.
+Topics: `learning`, `schedule`, `wellbeing`, `academics`, `interests`, `budget`. A topic is done when
+one of its needs is set or the parent answered a question about it. Show it as a small meter.
+
 ### `clarifying_question`
 
 At most one per turn.
@@ -247,9 +268,33 @@ At most one per turn.
     {"id": "ok_5pm", "label": "5pm is fine"},
     {"id": "need_6pm", "label": "I need until 6pm"}
   ],
-  "allow_text": true
+  "allow_text": true,
+  "topic": "schedule"
 }
 ```
+
+`topic` (optional) names the family profile topic the question is about. Once schools are shown,
+every turn asks one (decision 041): a trade-off first, otherwise the next unknown topic. A
+`chip_edit` keeps the open question (same `question_id`; don't show it twice) unless the edit
+answered it, and otherwise asks the next topic in code's words.
+
+### `visit_offer`
+
+The step after saving (decision 041): see the schools in person with a local partner. Code adds
+it on a `compare` turn, when the parent asks about visiting (the model sets `offer_visit`), or once
+on its own when the profile is complete and the parent has saved schools. Partners come from code.
+
+```json
+{
+  "type": "visit_offer",
+  "text": "Ready to see Tamarind Cove STEM Academy and Kestrel Point Middle School in person? A local partner can visit with you or talk your list through, for free.",
+  "schools": [{"school_id": "fl-1", "name": "Tamarind Cove STEM Academy"}],
+  "partners": [{"partner_id": "tidewater-navigators", "name": "Tidewater Family Navigators", "...": "as in GET /api/partners"}]
+}
+```
+
+Show it as a card in the reply with a "Plan a visit" button that opens the planner
+(`GET /api/partners` with these `school_ids`, then `POST /api/visits`).
 
 ### `progress`
 

@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from . import routing, store
 
 log = logging.getLogger("gs_agent.turn_cache")
-VERSION = "1"  # bump when the cached shape or the agent's behavior changes
+VERSION = "2"  # bump when the cached shape or the agent's behavior changes
 MAX_BYTES = 350_000  # DynamoDB items hold 400 KB
 
 
