@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useId, forwardRef } from 
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence, MotionConfig } from 'motion/react'
 import logo from './assets/greatschools-logo.png'
-import { turn, saveSchool, unsaveSchool, rateReply, getSchool } from './api.js'
+import { turn, saveSchool, unsaveSchool, rateReply, getSchool, getPartners, requestVisit, listVisits } from './api.js'
 
 // Statuses are decided by the backend's code (docs/contract.md, section 2); we only word them.
 const STATUS = {
@@ -157,7 +157,8 @@ function ChipMenu({ c, anchor, onMove, onOff, onClose }) {
 function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
   const [menu, setMenu] = useState(null)
   if (!block) return null
-  const { chips = [], unmapped = [], suggested = [] } = block
+  const { chips = [], unmapped = [], suggested = [], profile } = block
+  const next = profile?.topics.find(t => !t.done)
   const offList = [...off.values()].filter(o => !chips.some(c => c.need === o.need))
   const menuChip = chips.find(c => c.need === menu?.need)
   const flow = []
@@ -193,6 +194,18 @@ function Filters({ block, off, onMove, onOff, onOn, onAdd, busy }) {
   }
   return (
     <div className="buckets">
+      {/* The family profile the agent's questions fill in, one topic at a time (decision 042) */}
+      {profile && (
+        <div className="profile" aria-label={`Your family profile: ${profile.done} of ${profile.total} topics known`}>
+          <span className="lbl">Your family profile</span>
+          <span className="segs" aria-hidden="true">
+            {profile.topics.map(t => <motion.i key={t.id} title={t.label} className={t.done ? 'on' : ''} initial={false}
+              animate={{ scaleY: t.done ? 1 : 0.6 }} transition={spring} />)}
+          </span>
+          <span className="hint">{profile.done === profile.total ? 'Complete' : `${profile.done} of ${profile.total}`}
+            {next && <> · next: {next.label.toLowerCase()}</>}</span>
+        </div>
+      )}
       {/* The menu goes on the page body: the sticky header's blur would offset a fixed position */}
       {createPortal(<AnimatePresence>{menuChip && !busy && <ChipMenu key={menuChip.need} c={menuChip} anchor={menu.el}
         onMove={onMove} onOff={onOff} onClose={() => setMenu(null)} />}</AnimatePresence>, document.body)}
@@ -457,7 +470,115 @@ export function firstSentence(text) {
   return [t, '']
 }
 
-function Message({ m, live, canUndo, onUndo, onOption, onVote, onOpenComparison, busy }) {
+// The step after saving: see the schools in person with a local partner (decision 042)
+function VisitOffer({ offer, onPlan }) {
+  const names = offer.partners.map(p => p.name)
+  return (
+    <motion.div className="visit-offer" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={soft}>
+      <b>Next step: see them in person</b>
+      <span>{offer.text}</span>
+      <small>{names.slice(0, 2).join(' or ')}{names.length > 2 ? ` and ${names.length - 2} more` : ''} · free</small>
+      <motion.button whileTap={{ scale: 0.95 }} onClick={() => onPlan(offer)}>Plan a visit</motion.button>
+    </motion.div>
+  )
+}
+
+const WHEN = { 'Weekday mornings': 'on a weekday morning', 'Weekday afternoons': 'on a weekday afternoon', Evenings: 'in the evening', Saturdays: 'on a Saturday' }
+const pick = (list, value, set, label = x => x) => (
+  <div className="pills">{list.map(x => (
+    <button key={x} type="button" className={value === x ? 'on' : ''} aria-pressed={value === x} onClick={() => set(x)}>{label(x)}</button>
+  ))}</div>
+)
+
+function VisitPlanner({ seed, sessionId, onClose, onSent }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [partnerId, setPartnerId] = useState(null)
+  const [schoolIds, setSchoolIds] = useState([])
+  const [way, setWay] = useState('visit')
+  const [when, setWhen] = useState(null)
+  const [language, setLanguage] = useState(null)
+  const [note, setNote] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sent, setSent] = useState(null)
+  useEffect(() => {
+    let active = true
+    getPartners(sessionId, (seed?.schools || []).map(s => s.school_id))
+      .then(d => { if (!active) return; setData(d); if (d.partners[0]) choose(d.partners[0]) })
+      .catch(e => { if (active) setError(e.message) })
+    return () => { active = false }
+  }, [sessionId, seed])
+  useEffect(() => { const f = e => e.key === 'Escape' && onClose(); window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f) }, [onClose])
+  const choose = p => { setPartnerId(p.partner_id); setSchoolIds(p.schools.map(s => s.school_id)); setLanguage(p.languages[0]) }
+  const partner = data?.partners.find(p => p.partner_id === partnerId)
+  const toggle = id => setSchoolIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+  const ready = partner && schoolIds.length && when && language && !sending
+  const submit = async e => {
+    e.preventDefault()
+    if (!ready) return
+    setSending(true); setError(null)
+    try {
+      const res = await requestVisit({ session_id: sessionId, partner_id: partnerId, school_ids: schoolIds, way, when, language, note })
+      setSent(res.request); onSent(res.requests, res.request)
+    } catch (err) { setError(err.message) } finally { setSending(false) }
+  }
+  return (
+    <motion.div className="overlay" onClick={onClose} {...fade}>
+      <motion.div className="modal visit" onClick={e => e.stopPropagation()} role="dialog" aria-label="Plan a school visit"
+        initial={{ opacity: 0, y: 28, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.98 }} transition={spring}>
+        <button className="x" onClick={onClose} aria-label="Close">×</button>
+        <h2>See schools in person</h2>
+        {sent ? (
+          <motion.div className="sent" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={spring}>
+            <p className="big">✓ Request sent to {sent.partner_name}</p>
+            <p>{sent.way_label} for {sent.schools.map(s => s.name).join(', ')}, {WHEN[sent.when] || sent.when}, in {sent.language}.
+              They’ll contact you through your GreatSchools account, usually by {day(sent.reply_by)}.</p>
+            <p className="meta">You’ll find this request in My list.</p>
+            <button className="cta" onClick={onClose}>Done</button>
+          </motion.div>
+        ) : <>
+          <p className="summary">GreatSchools works with local nonprofits and parent guides who know these schools first-hand. They can visit with you, or talk your list through first. It’s free.</p>
+          {error && <p className="watch">{error}</p>}
+          {!data && !error && <div className="skel-lines" aria-label="Loading"><i /><i /><i /></div>}
+          {data && !data.partners.length && <p className="meta">We don’t have a local partner for {data.schools.length ? 'these schools' : 'your list'} yet. Save a school first, or ask the school for a tour.</p>}
+          {data?.partners.length > 0 && <form onSubmit={submit}>
+            <h4>Who can help</h4>
+            <div className="partners">{data.partners.map(p => (
+              <label key={p.partner_id} className={'partner' + (p.partner_id === partnerId ? ' on' : '')}>
+                <input type="radio" name="partner" checked={p.partner_id === partnerId} onChange={() => choose(p)} />
+                <b>{p.name}</b><small>{p.kind}</small>
+                <span>{p.what}</span>
+                <small>Knows {p.schools.map(s => s.name).join(', ')} · {p.languages.join(', ')} · replies in about {p.reply_days} days</small>
+              </label>
+            ))}</div>
+            {partner && <>
+              <h4>Which schools?</h4>
+              <div className="pills">{partner.schools.map(s => (
+                <button key={s.school_id} type="button" className={schoolIds.includes(s.school_id) ? 'on' : ''}
+                  aria-pressed={schoolIds.includes(s.school_id)} onClick={() => toggle(s.school_id)}>{s.name}</button>
+              ))}</div>
+              <h4>How?</h4>
+              {pick(partner.ways, way, setWay, w => data.ways[w])}
+              <h4>When are you free?</h4>
+              {pick(data.times, when, setWhen)}
+              <h4>Language</h4>
+              {pick(partner.languages, language, setLanguage)}
+              <h4>Anything they should know? <small>(optional)</small></h4>
+              <textarea value={note} maxLength={300} rows={2} onChange={e => setNote(e.target.value)}
+                placeholder="For example: we need to see the after-school program" />
+            </>}
+            <div className="send">
+              <motion.button className="cta" whileTap={{ scale: 0.96 }} disabled={!ready}>{sending ? 'Sending…' : 'Send request'}</motion.button>
+              <small>Sample partners for this demo: no request reaches anyone.</small>
+            </div>
+          </form>}
+        </>}
+      </motion.div>
+    </motion.div>
+  )
+}
+
+function Message({ m, live, canUndo, onUndo, onOption, onVote, onOpenComparison, onPlanVisit, busy }) {
   const [open, setOpen] = useState(false)
   const ai = m.r === 'ai' && !m.error
   const [summary, rest] = ai ? firstSentence(m.t) : [m.t, '']
@@ -496,6 +617,7 @@ function Message({ m, live, canUndo, onUndo, onOption, onVote, onOpenComparison,
         {m.question && <p className="ask"><b>{m.question.text}</b>{full && m.question.why && <small>{m.question.why}</small>}</p>}
         {m.comparison && <button className="link" onClick={() => onOpenComparison(m.comparison)}>Open the comparison table</button>}
         {m.programs?.length > 0 && <div className="progs">{m.programs.map((p, i) => <ProgramCard key={p.program_id} p={p} i={i} />)}</div>}
+        {m.visit && <VisitOffer offer={m.visit} onPlan={onPlanVisit} />}
       </div>
       {/* Turning a need off is undone in one tap, right where the parent reads the result */}
       <AnimatePresence>
@@ -540,7 +662,7 @@ function Typing({ progress }) {
   )
 }
 
-function Chat({ msgs, progress, busy, question, send, off, onUndo, onOption, onVote, onOpenComparison }) {
+function Chat({ msgs, progress, busy, question, send, off, onUndo, onOption, onVote, onOpenComparison, onPlanVisit }) {
   const [text, setText] = useState('')
   const box = useRef(null)
   useEffect(() => { const b = box.current; if (b) b.scrollTop = b.scrollHeight }, [msgs, progress])
@@ -549,7 +671,7 @@ function Chat({ msgs, progress, busy, question, send, off, onUndo, onOption, onV
       <div className="msgs" ref={box}>
         {msgs.map((m, i) => <Message key={i} m={m} live={!!m.question && m.question === question} busy={busy}
           canUndo={!!m.undo && off.has(m.undo.need)} onUndo={onUndo}
-          onOption={onOption} onVote={onVote} onOpenComparison={onOpenComparison} />)}
+          onOption={onOption} onVote={onVote} onOpenComparison={onOpenComparison} onPlanVisit={onPlanVisit} />)}
         <AnimatePresence>{busy && <Typing key="typing" progress={progress} />}</AnimatePresence>
       </div>
       <form className="in" onSubmit={e => { e.preventDefault(); if (text.trim() && !busy) { send(text.trim()); setText('') } }}>
@@ -577,6 +699,8 @@ export default function App() {
   const [saved, setSaved] = useState(new Map())  // school_id -> school (for the saved list)
   const [showSaved, setShowSaved] = useState(false)
   const [details, setDetails] = useState(null)
+  const [planning, setPlanning] = useState(null)  // the visit offer the planner opened from, or {} from My list
+  const [visits, setVisits] = useState([])  // visit and call requests to local partners
   const [split, setSplit] = useState(58)
   const [pane, setPane] = useState('schools')  // phones show one pane at a time
   const [unread, setUnread] = useState(false)
@@ -618,11 +742,13 @@ export default function App() {
         setPicked(p => p.filter(id => b.results.some(r => r.school_id === id)))
       } else if (b.type === 'program_results') setPrograms(b)
       else if (b.type === 'comparison') { setComparison(b); reply.comparison = b; if (b.summary) reply.t = b.summary }
+      else if (b.type === 'visit_offer') reply.visit = b
     }
-    if (nextQuestion) reply.question = nextQuestion
-    if (!reply.t && !reply.question && !reply.callouts) {
-      reply.t = extra?.note || (kind === 'chip_edit' ? 'I updated the results for your new list.' : 'Here’s what I found.')
-    }
+    // A chip edit keeps the open question: leave it live where it was instead of asking it twice
+    const same = nextQuestion && question && nextQuestion.question_id === question.question_id
+    if (nextQuestion && !same) reply.question = nextQuestion
+    if (kind === 'chip_edit' && !reply.t) reply.t = extra?.note || 'I updated the results for your new list.'
+    else if (!reply.t && !reply.question && !reply.callouts) reply.t = extra?.note || 'Here’s what I found.'
     if (results) {
       // A new search starts at the first 4 cards (a chip edit keeps what the parent opened), and
       // every card the reply talks about is shown, so no school it names is hidden
@@ -631,7 +757,7 @@ export default function App() {
       results.forEach((r, i) => { const w = core(r.name); if (calloutIds.includes(r.school_id) || (w.length > 3 && said.includes(w))) last = i })
       setShown(n => Math.max(kind === 'chip_edit' ? n : PAGE, Math.ceil((last + 1) / PAGE) * PAGE))
     }
-    setQuestion(nextQuestion)
+    setQuestion(same ? question : nextQuestion)
     addMsg(reply)
     // On a phone, a question needs the chat; otherwise flag the new reply on the Chat tab.
     if (nextQuestion && !results) setPane('chat')
@@ -694,6 +820,15 @@ export default function App() {
       else {
         const res = await saveSchool(sid, r.school_id)
         if (res.programs?.length) addMsg({ r: 'ai', t: `Saved ${r.name}. These nearby programs could help with what it doesn’t fully cover:`, programs: res.programs })
+        // The agent keeps going after a save (decision 042): the next profile question, or a visit offer
+        const q = res.follow_up?.find(b => b.type === 'clarifying_question')
+        const visit = res.follow_up?.find(b => b.type === 'visit_offer')
+        if (q || visit) {
+          const lead = res.programs?.length ? '' : `Saved ${r.name}. `
+          addMsg({ r: 'ai', t: lead + (q ? 'One more question while you look, so I can keep narrowing your list.' : ''), question: q, visit })
+          if (q) setQuestion(q)
+          if (paneNow.current !== 'chat') setUnread(true)
+        }
       }
     } catch (e) {
       setSaved(s => { const n = new Map(s); on ? n.set(r.school_id, r) : n.delete(r.school_id); return n })
@@ -720,6 +855,7 @@ export default function App() {
       writeSid(res.session_id)
       setSaved(new Map((res.saved || []).map(s => [s.school_id, s])))
     } catch { /* the list just stays as it is */ }
+    try { setVisits((await listVisits(sid)).requests || []) } catch { /* shown next time */ }
   }
 
   const newSearch = () => {
@@ -787,6 +923,18 @@ export default function App() {
                       ))}
                     </AnimatePresence>
                   )}
+                  {/* The end of the journey: from a saved list to seeing the schools with someone local */}
+                  {visits.map(v => (
+                    <p key={v.request_id} className="visitreq">
+                      <b>✓ {v.way === 'call' ? 'Call' : 'Visit'} requested</b> with {v.partner_name} for {v.schools.map(s => s.name).join(', ')}.
+                      <small>They’ll reply by {day(v.reply_by)}.</small>
+                    </p>
+                  ))}
+                  {saved.size > 0 && (
+                    <button className="cta small" onClick={() => { setPlanning({ schools: [...saved.values()] }); setShowSaved(false) }}>
+                      Plan a visit with a local guide
+                    </button>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -843,7 +991,7 @@ export default function App() {
           <div className="chatw" style={{ width: 100 - split + '%' }}>
             <Chat msgs={msgs} progress={progress} busy={busy} question={question} send={send} onOption={answer}
               off={off} onUndo={turnOn}
-              onVote={vote} onOpenComparison={setComparison} />
+              onVote={vote} onOpenComparison={setComparison} onPlanVisit={setPlanning} />
           </div>
         </div>
         <motion.div className="cmpbar" style={{ width: split + '%' }} initial={false} animate={{ y: picked.length ? 0 : '110%' }} transition={spring}>
@@ -860,6 +1008,13 @@ export default function App() {
       <AnimatePresence>
         {details && <Details key={details.school_id} school={details} sessionId={sessionId} labels={labels} saved={saved.has(details.school_id)}
           onSave={toggleSave} onClose={() => setDetails(null)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {planning && <VisitPlanner key="visit" seed={planning} sessionId={sessionId} onClose={() => setPlanning(null)}
+          onSent={(all, req) => {
+            setVisits(all)
+            addMsg({ r: 'ai', t: `I sent your ${req.way === 'call' ? 'call' : 'visit'} request to ${req.partner_name}. They usually reply by ${day(req.reply_by)}. After your visits, tell me which school felt right and I’ll help with the next steps.` })
+          }} />}
       </AnimatePresence>
     </div>
     </MotionConfig>

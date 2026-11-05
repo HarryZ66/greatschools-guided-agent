@@ -2,6 +2,7 @@
 
 Single table (see infra/stacks/data_stack.py):
     pk = SESSION#<id>   sk = SAVED#<school_id> | FEEDBACK#TURN#<n> or FEEDBACK#<school_id> | SEARCH#<iso time>
+                        | VISIT#<request id> (a visit or call request to a local partner, decision 042)
     pk = CACHE#<key>    sk = TURN (a cached first-turn answer, with `expires`)
 """
 
@@ -51,6 +52,17 @@ def saved_schools(session_id: str) -> list[dict]:
     return [{"school_id": i["school_id"], "name": i.get("name"), "at": i["at"]} for i in items["Items"]]
 
 
+def save_visit(session_id: str, request: dict) -> None:
+    _table().put_item(Item={"pk": _pk(session_id), "sk": f"VISIT#{request['request_id']}", **request, "at": _now()})
+
+
+def visits(session_id: str) -> list[dict]:
+    items = _table().query(KeyConditionExpression=Key("pk").eq(_pk(session_id)) & Key("sk").begins_with("VISIT#"))
+    keep = ("request_id", "partner_id", "partner_name", "way", "way_label", "when", "language", "schools", "note",
+            "status", "reply_by", "sample", "at")
+    return sorted(({k: i[k] for k in keep if k in i} for i in items["Items"]), key=lambda v: v.get("at", ""))
+
+
 def record_feedback(session_id: str, vote: str, school_id: str | None = None, turn: int | None = None) -> None:
     """One vote per reply (or per school) per session; a new vote replaces the old one."""
     target = {"turn": turn} if turn is not None else {"school_id": school_id}
@@ -64,11 +76,11 @@ def record_search(session_id: str, criteria_count: int, result_count: int) -> No
 
 
 def metrics() -> dict:
-    """GreatSchools' metrics: saves-to-searches (primary), thumbs relevance, criteria per search.
+    """GreatSchools' metrics: saves-to-searches (primary), thumbs relevance, criteria per search, visit requests.
 
     A full scan is fine at hackathon scale; production would aggregate with streams.
     """
-    searches = saves = up = down = criteria = 0
+    searches = saves = up = down = criteria = visits_ = 0
     kwargs: dict = {}
     while True:
         page = _table().scan(**kwargs)
@@ -79,6 +91,8 @@ def metrics() -> dict:
                 criteria += int(item.get("criteria_count", Decimal(0)))
             elif sk.startswith("SAVED#"):
                 saves += 1
+            elif sk.startswith("VISIT#"):
+                visits_ += 1
             elif sk.startswith("FEEDBACK#"):
                 up += item.get("vote") == "up"
                 down += item.get("vote") == "down"
@@ -93,6 +107,7 @@ def metrics() -> dict:
         "thumbs_down": down,
         "relevance": round(up / (up + down), 3) if up + down else None,
         "criteria_per_search": round(criteria / searches, 2) if searches else None,
+        "visit_requests": visits_,  # the step after saving: a visit or call with a local partner
     }
 
 

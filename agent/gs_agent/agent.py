@@ -21,10 +21,12 @@ from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models import BedrockModel, CacheConfig
 
+from . import family
 from . import fastpath
 from . import gateway_client as G
 from . import knowledge
 from . import needs as N
+from . import partners
 from . import programs as P
 from . import routing
 from . import search
@@ -78,6 +80,8 @@ class Question(BaseModel):
     why: str = Field(description="One short sentence: why the answer changes the results")
     # Code gives each option its id, so the model only writes the words (decision 035)
     options: list[str] = Field(description="2-4 short tappable answers")
+    topic: str | None = Field(default=None, description=(
+        "Id of the family profile topic this question is about, from the profile note; null for other questions"))
 
 
 class Callout(BaseModel):
@@ -104,6 +108,9 @@ class Decision(BaseModel):
     callouts: list[Callout] = Field(default_factory=list, description="0-2 honest notes about the data")
     sources: list[str] = Field(default_factory=list,
                                description="ids of guide entries from lookup_content that your message relies on")
+    offer_visit: bool = Field(default=False, description=(
+        "true when the parent asks about visiting or touring schools, talking to someone local, or says "
+        "they're ready to decide. The app then offers a visit with a local partner."))
 
 
 SYSTEM_PROMPT = """You are GreatSchools' guided school-search agent. Motto: "We investigate. You decide."
@@ -158,6 +165,19 @@ How you work:
    health support is now a top concern that parents rarely ask about: unless the parent already
    mentioned it, mental_health is a good suggestion, with a why like "Many parents now ask about
    counseling support." Never search with a suggested need until they add it.
+9. Keep building the family profile: parents don't know what to ask, so asking is how you help.
+   Each turn ends with a note from code listing the profile topics still unknown. Once schools are
+   shown, every reply ends with ONE question, with 2-4 tappable options: a trade-off from
+   question_hints first, otherwise the first unknown topic, in words that fit this family (set
+   question.topic to its id). After a comparison, ask about what would settle the choice between
+   the two schools. Only skip the question when the profile is complete and nothing is left to decide.
+   Topics are filled by asking, never by assuming: don't add a need the parent didn't state just
+   because its topic is unknown (offer it as an option or a suggestion instead).
+10. Visiting schools: GreatSchools works with local partners (nonprofits and parent guides) who
+   visit schools with families or talk a list through with them, for free. When the parent asks
+   about visiting, touring, seeing a school in person or talking to someone local, or says they're
+   ready to decide, set offer_visit to true and say in one sentence that a local partner can help.
+   Don't name partners or promise times; the app shows who serves their schools.
 You have at most {max_tools} tool calls per turn.
 
 Honesty rules:
@@ -229,6 +249,9 @@ class GuidedSession:
         self._usage_agent, self._usage_seen = None, {}
         self.unmapped: list[str] = []
         self.suggestions: list[dict] = []
+        self.asked_topics: set[str] = set()  # family profile topics we asked about (family.py)
+        self.answered_topics: set[str] = set()  # ... and the ones the parent answered
+        self.visit_offered = False  # the visit offer appears on its own once; asking or comparing brings it back
         self.turned_off: list[str] = []  # needs the parent switched off; not suggested back to them
         self.on_progress: Callable[[str], None] | None = None  # set by the streaming endpoint
         self._tool_calls = 0
@@ -496,6 +519,8 @@ class GuidedSession:
             label = event.get("text") or self._option_label(event.get("option_id"))
             question = (self.pending_question or {}).get("text", "")
             self._answer_text = label
+            if topic := (self.pending_question or {}).get("topic"):
+                self.answered_topics.add(topic)
             return self._agent_turn(f'(Answer to your question "{question}"): {label}')
         if kind == "compare":
             self.comparison = self._comparison(event.get("school_ids", [])[:2])
@@ -507,7 +532,8 @@ class GuidedSession:
             return self._agent_turn(
                 f"Compare {names} for my needs. Here is the side-by-side check (already shown to me as a table): "
                 f"{json.dumps(self.comparison['rows'])}. Don't call tools. In the message, say in 1-2 sentences "
-                "what the real difference is for my family. No question unless a choice really depends on it.")
+                "what the real difference is for my family. Then ask ONE question whose answer would settle the "
+                "choice between them (or about the next unknown profile topic), with 2-4 options.")
         if kind == "chip_edit":
             return self._chip_edit(event)
         if kind == "new_search":
@@ -570,8 +596,9 @@ class GuidedSession:
     # ---------------------------------------------------------------- saving and restoring
 
     _STATE = ("needs", "semantic_query", "last", "pending_question", "seen_content", "seen_documents",
-              "last_programs", "unmapped", "suggestions", "turned_off", "_strong", "_needs_recap_pending")
-    _SETS = ("seen_ids", "seen_programs")
+              "last_programs", "unmapped", "suggestions", "turned_off", "_strong", "_needs_recap_pending",
+              "visit_offered")
+    _SETS = ("seen_ids", "seen_programs", "asked_topics", "answered_topics")
 
     def snapshot(self) -> dict:
         """The conversation as plain JSON, to restore in another process (decisions 036 and 037).
@@ -606,6 +633,7 @@ class GuidedSession:
         self.seen_documents = {}
         self.last_programs, self.programs_fresh = None, False
         self.unmapped, self.suggestions, self.turned_off = [], [], []
+        self.asked_topics, self.answered_topics, self.visit_offered = set(), set(), False
         self._needs_recap_pending = False
         self._strong = False
         self.agent = self._new_agent()
@@ -619,6 +647,7 @@ class GuidedSession:
             self._needs_recap_pending = False
             if self.needs:
                 text = f"{self._recap()}\n\n{text}"
+        text = f"{text}\n\n{family.prompt_note(self._profile_needs(), self.answered_topics, self.asked_topics)}"
         model_id, reason = routing.choose(text, self._strong)
         self._strong = self._strong or reason is not None
         history = copy.deepcopy(self.agent.messages)  # to retry this turn on the strong model
@@ -735,6 +764,7 @@ class GuidedSession:
     def _chip_edit(self, event: dict) -> dict:
         """Editing a chip re-runs search and verify in code; no model call."""
         need_id = event["need"]
+        known_before = family.covered(self._profile_needs(), self.answered_topics)
         old = next((n for n in self.needs if n["need"] == need_id), None)
         self.needs = [n for n in self.needs if n["need"] != need_id]
         if event.get("removed"):
@@ -749,9 +779,77 @@ class GuidedSession:
         self.last = search.find(self.needs, self.semantic_query)
         self._trace_search(self.needs, started, set())
         self._step("rerank", "Code (no model)", "Re-ranked in code without calling the model")
+        # Keep asking (decision 042): the open question stays unless this edit answered it; else the next topic
+        question = self.pending_question
+        answered_now = family.covered(self._profile_needs(), self.answered_topics) - known_before
+        if question and question.get("topic") in answered_now:
+            question = None
+        question = question or self.next_question()
         self.agent.messages.append({"role": "user", "content": [{"text": f"(I changed my criteria: {json.dumps(event)})"}]})
-        self.agent.messages.append({"role": "assistant", "content": [{"text": "Updated the results."}]})
-        return self._blocks(None)
+        self.agent.messages.append({"role": "assistant", "content": [
+            {"text": "Updated the results." + (f" {question['text']}" if question else "")}]})
+        return self._blocks(None, question=question)
+
+    def _profile_needs(self) -> list[dict]:
+        """Needs that tell us about a profile topic: the current ones, and ones the parent turned off."""
+        return self.needs + [{"need": n} for n in self.turned_off]
+
+    def next_question(self) -> dict | None:
+        """The next family profile question, in code's words, once there are schools to refine."""
+        if not (self.last or {}).get("results"):
+            return None
+        left = family.remaining(self._profile_needs(), self.answered_topics, self.asked_topics)
+        if not left:
+            return None
+        t = left[0]
+        return {"question_id": "q-" + uuid.uuid4().hex[:6], "text": t.question, "why": t.why,
+                "options": [{"id": f"o{i + 1}", "label": o} for i, o in enumerate(t.options)],
+                "allow_text": True, "topic": t.id}
+
+    def after_save(self) -> list[dict]:
+        """What the agent says after a save (code only): the next profile question, or the visit offer."""
+        if self.pending_question:  # one open question at a time
+            return []
+        if question := self.next_question():
+            self.pending_question = question
+            self.asked_topics.add(question["topic"])
+            return [{"type": "clarifying_question", **question}]
+        offer = self._visit_offer(force=False)
+        return [offer] if offer else []
+
+    def _visit_offer(self, force: bool, school_ids: list[str] | None = None) -> dict | None:
+        """A visit or call with a local partner, for the schools the parent is weighing (decision 042).
+
+        Shown when asked for (`force`), or once on its own when the profile is complete and the
+        parent has saved schools. The partners and their schools come from code, never the model.
+        """
+        complete = not family.remaining(self._profile_needs(), self.answered_topics, self.asked_topics)
+        if not force and (self.visit_offered or not complete or not self.saved):
+            return None
+        results = {r["school_id"]: r for r in (self.last or {}).get("results", [])}
+        ids = school_ids or sorted(self.saved) or list(results)[:3]
+        schools = []
+        for sid in ids[:6]:
+            school = results.get(sid)
+            if school is None:
+                try:
+                    school = search.get_school(sid)
+                except Exception:
+                    log.exception("could not look up %s for the visit offer", sid)
+            if school:
+                schools.append({"school_id": sid, "name": school.get("name"), "city": school.get("city")})
+        found = partners.for_schools(schools)
+        if not found:
+            return None
+        self.visit_offered = True
+        self._step("visit_offer", "Code (no model)",
+                   f"Found {len(found)} local partner{'s' if len(found) != 1 else ''} who can visit "
+                   f"{'these schools' if len(schools) != 1 else 'this school'} with you")
+        names = [s["name"] for s in schools if s["name"]]
+        what = names[0] if len(names) == 1 else " and ".join(names) if len(names) == 2 else "these schools"
+        return {"type": "visit_offer", "text": f"Ready to see {what} in person? A local partner can visit with you "
+                                               "or talk your list through, for free.",
+                "schools": [{"school_id": s["school_id"], "name": s["name"]} for s in schools], "partners": found}
 
     def _comparison(self, school_ids: list[str]) -> dict | None:
         """Side-by-side table built in code from the same verify rules as the cards."""
@@ -780,7 +878,7 @@ class GuidedSession:
 
     # ---------------------------------------------------------------- blocks
 
-    def _blocks(self, decision: Decision | None, show_results: bool = True) -> dict:
+    def _blocks(self, decision: Decision | None, show_results: bool = True, question: dict | None = None) -> dict:
         blocks: list[dict[str, Any]] = []
         # A restored value keeps its earlier label ("Care until 6pm"), not the model's new one
         self.chip_labels.update({c.need: c for c in (decision.chips if decision else [])
@@ -811,7 +909,8 @@ class GuidedSession:
                           "source": c.source if c else "stated"})
         if chips or self.unmapped or self.suggestions:
             blocks.append({"type": "criteria_chips", "chips": chips, "unmapped": self.unmapped,
-                           "suggested": self.suggestions})
+                           "suggested": self.suggestions,
+                           "profile": family.meter(self._profile_needs(), self.answered_topics)})
 
         if decision and decision.message and not self.comparison:  # a comparison carries it as its summary
             # Only entries lookup_content actually returned can be cited
@@ -821,14 +920,30 @@ class GuidedSession:
                        for s in decision.sources if s in self.seen_content]
             blocks.append({"type": "text", "markdown": decision.message, **({"sources": sources} if sources else {})})
 
-        self.pending_question = None
+        self.pending_question = question
         if decision and decision.question:
             q = decision.question
             self.pending_question = {"question_id": "q-" + uuid.uuid4().hex[:6], "text": q.text, "why": q.why,
                                      "options": [{"id": f"o{i + 1}", "label": plain_label(label)}
                                                  for i, label in enumerate(q.options)],
-                                     "allow_text": True}
+                                     "allow_text": True,
+                                     **({"topic": q.topic} if q.topic in family.BY_ID else {})}
+        if self.pending_question:
+            if topic := self.pending_question.get("topic"):
+                self.asked_topics.add(topic)
             blocks.append({"type": "clarifying_question", **self.pending_question})
+
+        # The step after saving: see the schools in person with a local partner
+        compared = self.comparison["school_ids"] if self.comparison else None
+        offer = None
+        if decision or compared:
+            try:
+                offer = self._visit_offer(force=bool(compared or (decision and decision.offer_visit)),
+                                          school_ids=compared)
+            except Exception:
+                log.exception("could not build the visit offer")
+        if offer:
+            blocks.append(offer)
 
         if self.comparison:
             blocks.append({"type": "comparison", "school_ids": self.comparison["school_ids"],

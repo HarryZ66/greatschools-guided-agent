@@ -1,0 +1,49 @@
+{
+  "_about": "Sample local partners for the demo (decision 042). These organizations are made up, like the schools: GreatSchools told us real nonprofits and local partners visit schools and know them well, but parents rarely know they exist. A real launch would load GreatSchools' own partner list here. No request reaches anyone.",
+  "partners": [
+    {
+      "partner_id": "tidewater-navigators",
+      "name": "Tidewater Family Navigators",
+      "kind": "Nonprofit family school navigators",
+      "what": "A volunteer guide visits schools with you, helps you ask the right questions, and explains how to apply.",
+      "cities": ["Miami", "Miami Beach", "North Miami", "Miami Gardens"],
+      "languages": ["English", "Spanish", "Haitian Creole"],
+      "ways": ["visit", "call"],
+      "reply_days": 2,
+      "cost": "Free"
+    },
+    {
+      "partner_id": "sawgrass-parent-partners",
+      "name": "Sawgrass Parent Partners",
+      "kind": "Community parent network",
+      "what": "Parents whose children go to local schools take you on a tour and share what daily life there is like.",
+      "cities": ["Hialeah", "Doral", "Kendall"],
+      "languages": ["English", "Spanish"],
+      "ways": ["visit", "call"],
+      "reply_days": 3,
+      "cost": "Free"
+    },
+    {
+      "partner_id": "mangrove-education-circle",
+      "name": "Mangrove Education Circle",
+      "kind": "Nonprofit school-choice counselors",
+      "what": "A counselor talks through your list with you, then sets up school visits and helps with scholarship forms.",
+      "cities": ["Coral Gables", "Kendall", "Cutler Bay", "Homestead"],
+      "languages": ["English", "Spanish"],
+      "ways": ["visit", "call"],
+      "reply_days": 2,
+      "cost": "Free"
+    },
+    {
+      "partner_id": "harborlight-parent-guides",
+      "name": "Harborlight Parent Guides",
+      "kind": "Library-based family guides",
+      "what": "Guides at the public library help you compare schools and arrange visits, with evening and Saturday times.",
+      "cities": ["Hollywood", "Fort Lauderdale"],
+      "languages": ["English", "Spanish", "Portuguese"],
+      "ways": ["visit", "call"],
+      "reply_days": 3,
+      "cost": "Free"
+    }
+  ]
+}

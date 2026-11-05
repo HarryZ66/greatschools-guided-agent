@@ -285,3 +285,34 @@ blockquote small{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 .chips::-webkit-scrollbar{display:none}
 .count span{display:none}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.01s!important}}
+
+/* family profile meter on the chips (decision 042) */
+.profile{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:13px}
+.profile .lbl{font-weight:700;color:var(--navy)}
+.profile .segs{display:inline-flex;gap:4px}
+.profile .segs i{display:block;width:22px;height:8px;border-radius:4px;background:var(--line);transition:background .3s}
+.profile .segs i.on{background:var(--green)}
+.profile .hint{color:var(--mut)}
+
+/* the step after saving: visit schools with a local partner (decision 042) */
+.cta{background:var(--green);color:#fff;border:0;border-radius:999px;padding:10px 20px;font-weight:700;transition:background .2s}
+.cta:hover:not(:disabled){background:#176aa3}
+.cta.small{width:100%;margin-top:10px;padding:8px 14px;font-size:14px}
+.visit-offer{display:grid;gap:4px;margin-top:10px;padding:12px 14px;background:#fff;border:1.5px solid var(--green);border-radius:12px;white-space:normal}
+.visit-offer b{color:var(--navy)}.visit-offer small{color:var(--mut)}
+.visit-offer button{justify-self:start;margin-top:6px;background:var(--green);color:#fff;border:0;border-radius:999px;padding:8px 16px;font-weight:700}
+.visitreq{margin:8px 0 0;font-size:13px;line-height:1.4}.visitreq b{color:var(--ok)}.visitreq small{display:block;color:var(--mut)}
+.modal.visit{max-width:640px}
+.modal.visit h4{margin:18px 0 8px;font-size:14px;color:var(--navy)}.modal.visit h4 small{font-weight:400;color:var(--mut)}
+.partners{display:grid;gap:8px}
+.partner{display:grid;gap:3px;padding:12px 14px 12px 38px;position:relative;border:1.5px solid var(--line);border-radius:12px;cursor:pointer;transition:border-color .2s,background .2s}
+.partner.on{border-color:var(--green);background:#f3f9fd}
+.partner input{position:absolute;left:14px;top:15px;accent-color:var(--green)}
+.partner small{color:var(--mut);font-size:12.5px}.partner span{font-size:14px}
+.pills{display:flex;flex-wrap:wrap;gap:8px}
+.pills button{background:#fff;border:1.5px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;color:var(--ink);transition:border-color .2s,background .2s,color .2s}
+.pills button.on{border-color:var(--green);background:var(--green);color:#fff}
+.modal.visit textarea{width:100%;font:inherit;font-size:14px;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;resize:vertical}
+.modal.visit .send{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}
+.modal.visit .send small{color:var(--mut);font-size:12px}
+.modal.visit .sent .big{font-size:18px;font-weight:700;color:var(--ok);margin:4px 0 8px}
