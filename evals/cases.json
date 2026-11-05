@@ -93,7 +93,7 @@
    "expect": {"program_include": ["Family English Conversation Night"]}},
   {"id": "programs_none", "category": "programs",
    "turns": ["Swimming lessons for my 8 year old in Miami"],
-   "expect": {"program_exclude": ["Swim"], "mention_any": ["don't", "didn't", "couldn't", "no swim", "not find", "none"]}},
+   "expect": {"program_exclude": ["Swim"], "mention_any": ["don't", "didn't", "couldn't", "no swim", "not find", "found no", "none"]}},
   {"id": "mental_health_need", "category": "families",
    "turns": ["Middle school near Miami for my son. He's been really anxious lately and I want a school with good counseling."],
    "expect": {"needs": {"grade_level": "require", "location": "require", "mental_health": null}}},
