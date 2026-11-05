@@ -24,6 +24,9 @@ from .turn_cache import pack, unpack
 
 log = logging.getLogger("gs_agent.memory")
 SERVICE = "Amazon Bedrock AgentCore Memory"
+# The blob is a plain string: an object comes back from the service as a Java-style map string
+# ("{v=1, z=...}"), which loses its JSON. A version prefix leaves room to change the format.
+PREFIX = "v1:"
 
 
 def memory_id() -> str | None:
@@ -48,7 +51,7 @@ def save(session_id: str, state: dict) -> None:
         return
     try:
         _client().create_event(**_ids(session_id), eventTimestamp=datetime.now(timezone.utc),
-                               payload=[{"blob": {"v": 1, "z": pack(state)}}])
+                               payload=[{"blob": PREFIX + pack(state)}])
     except Exception:
         log.exception("could not save conversation %s to memory", session_id)
 
@@ -70,8 +73,11 @@ def load(session_id: str) -> dict | None:
                 break
         if newest is None:
             return None
-        event = _client().get_event(**ids, eventId=newest["eventId"])["event"]
-        return unpack(event["payload"][0]["blob"]["z"])
+        blob = _client().get_event(**ids, eventId=newest["eventId"])["event"]["payload"][0]["blob"]
+        if not isinstance(blob, str) or not blob.startswith(PREFIX):
+            log.warning("conversation %s has a saved state in an unknown format; starting fresh", session_id)
+            return None
+        return unpack(blob[len(PREFIX):])
     except Exception:
         log.exception("could not load conversation %s from memory", session_id)
         return None

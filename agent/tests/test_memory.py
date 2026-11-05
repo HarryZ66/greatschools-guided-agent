@@ -28,7 +28,12 @@ class FakeMemory:
         return {"events": list(reversed(mine))}  # no promised order
 
     def get_event(self, memoryId, actorId, sessionId, eventId):
-        return {"event": next(e for e in self.events if e["eventId"] == eventId)}
+        event = next(e for e in self.events if e["eventId"] == eventId)
+        # Like the real service: a string blob comes back as sent, an object as a Java-style map string
+        blob = event["payload"][0]["blob"]
+        if isinstance(blob, dict):
+            blob = "{" + ", ".join(f"{k}={v}" for k, v in blob.items()) + "}"
+        return {"event": {**event, "payload": [{"blob": blob}]}}
 
 
 @pytest.fixture
