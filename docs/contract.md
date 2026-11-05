@@ -48,7 +48,8 @@ For every school × need, `verify_criteria` returns one status:
 - Reviews (`reviews_full[].created_date`): reviews over 3 years old don't count toward
   `confirmed`, and the UI labels them "older review".
 
-**Data quality flags** (the value is shown but not used for ranking)
+**Data quality flags** (the value is shown but not used for a status; each flag takes 0.02 off the
+school's `score`, at most 3, so a clean school with the same checks ranks first)
 - `enrollment` of 0 or 1
 - `student_teacher_ratio` over 40
 - A school `start_time` in the PM, or an `end_time` in the AM
@@ -90,8 +91,16 @@ Event types:
 | `answer` | `question_id`, `option_id` or `text` | Yes |
 | `compare` | `school_ids` (2) | Yes |
 | `chip_edit` | `need`, `mode` (require/prefer/avoid) or `removed: true` | No: code re-runs search and verify |
+| `new_search` | none | No: forgets the conversation, keeps the session and its saved list; the response adds `saved` |
 
 Omit `session_id` on the first turn; every response returns the `session_id` to send next time.
+
+**Remembering the parent's list** (login is out of scope, so the session id stands in for the
+signed-in parent): store `session_id` in `localStorage`. On page load, if one is stored, call
+`GET /api/saved?session_id=…` to show My list, and send it with the next turn. It works after a
+server restart too, because saves live in DynamoDB. For "New search", send
+`{"session_id": <stored>, "event": {"type": "new_search"}}` instead of dropping the id; the
+response is `{"session_id", "blocks": [], "saved": [...], "trace": ...}`.
 
 `POST /api/turn/stream` takes the same body and answers with server-sent events: zero or more
 `progress` events (`{"type": "progress", "text": "Checked 10 schools; ranking the top 8."}`), then
@@ -118,6 +127,10 @@ Saving and feedback skip the agent entirely:
   (`by_topic` recent/older counts, up to 3 dated `excerpts` marked `older` past 3 years, `total`),
   `terms` (guide entries that explain fields on the page) and `cost`. No model call.
 - `GET /api/metrics`: `{searches, saves, saves_to_searches, thumbs_up, thumbs_down, relevance, criteria_per_search}`
+
+`new_search` also clears guide citation history, including knowledge-base document names, so a
+fresh conversation only cites documents retrieved in that conversation. It keeps the existing
+AgentCore runtime session id and returns the saved list through both turn endpoints.
 
 In the deployed app, agent turns, saves and session profiles run on Amazon Bedrock AgentCore Runtime
 (decision 025); the endpoints and payloads above don't change. Internally the runtime serves
@@ -250,7 +263,7 @@ Streamed while the agent works (the "I checked this for you" trace).
 ```
 
 `badge` is one "Best for ..." per school, or `null`, decided in code (`gs_agent/badges.py`,
-decision 029). A school earns it only when its status for that need is `confirmed` and it is the
+decision 031). A school earns it only when its status for that need is `confirmed` and it is the
 single strongest of the schools shown on a value in the data; a tie gives nobody the badge. Each
 school gets at most one badge and each need goes to at most one school. The parent's needs come
 first (must-haves, then nice-to-haves; `avoid` needs never give a badge), then extra needs the

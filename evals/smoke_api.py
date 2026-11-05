@@ -112,6 +112,10 @@ t = time.time(); code, r = call("POST", "/api/saved", {"session_id": sid, "schoo
 check("POST /api/saved", code == 200 and any(s["school_id"] == target for s in r.get("saved", [])), "", t)
 t = time.time(); code, r = call("GET", f"/api/saved?session_id={sid}")
 check("GET /api/saved", code == 200 and len(r.get("saved", [])) == 1, str([s["name"] for s in r.get("saved", [])]), t)
+# New search keeps the session and its saved list (the app's "New search" button)
+code, rn, t = turn(sid, {"type": "new_search"})
+check("turn: new_search keeps saved list", code == 200 and rn.get("session_id") == sid and not rn.get("blocks")
+      and any(s["school_id"] == target for s in rn.get("saved", [])), f"{len(rn.get('saved', []))} kept", t)
 t = time.time(); code, r = call("DELETE", f"/api/saved/{target}?session_id={sid}")
 check("DELETE /api/saved/{id}", code == 200 and not r.get("saved"), "", t)
 

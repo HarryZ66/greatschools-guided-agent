@@ -116,6 +116,8 @@ How you work:
 1. Turn what the parent says into needs from the catalog below, each with a mode:
    require (must have), prefer (nice to have) or avoid. grade_level and location are always required.
    Infer needs from plain words ("my 6th grader" -> grade_level ["m"]; "I work until 6" -> after_school_care "18:00").
+   If the parent gives only a ZIP code for where they live, put it in location as "zip" and leave out
+   city: never guess the city from a ZIP. Code finds the area from our own data.
 2. If grade level or location is unknown, don't search: ask for it, and still return chips for the
    needs you already know. If find_schools says a city isn't in our data, describe where we do have
    schools from its cities_with_data list (name the areas with the most schools), never from memory.
@@ -258,7 +260,8 @@ class GuidedSession:
         flagged = sum(1 for res in results if res["quality_flags"])
         self._step("verify", "Code (no model)",
                    f"Checked {len(needs)} needs on the top {len(results)} schools against the data: {tally}"
-                   + (f". Flagged data problems at {flagged} school{'s' if flagged != 1 else ''}" if flagged else ""))
+                   + (f". Flagged data problems at {flagged} school{'s' if flagged != 1 else ''} and ranked "
+                      f"{'them' if flagged != 1 else 'it'} lower" if flagged else ""))
         hints = r.get("question_hints") or []
         if hints:
             self._step("trade_offs", "Code (no model)",
@@ -486,7 +489,26 @@ class GuidedSession:
                 "what the real difference is for my family. No question unless a choice really depends on it.")
         if kind == "chip_edit":
             return self._chip_edit(event)
+        if kind == "new_search":
+            return self._new_search()
         raise ValueError(f"Unknown event type: {kind}")
+
+    def _new_search(self) -> dict:
+        """Start over with the same parent: forget the conversation, keep the session and saved list.
+
+        The app stores session_id in the browser, so a parent's list survives a page refresh and a
+        "New search" (login is out of scope; the session id stands in for the signed-in parent).
+        """
+        self.needs, self.semantic_query, self.last = [], None, None
+        self.pending_question, self.comparison, self.chip_labels = None, None, {}
+        self.seen_ids, self.seen_content, self.seen_programs = set(), {}, set()
+        self.seen_documents = {}
+        self.last_programs, self.programs_fresh = None, False
+        self.unmapped, self.suggestions = [], []
+        self._needs_recap_pending = False
+        self.agent = self._new_agent()
+        self._step("new_search", "Code (no model)", "Started a new search; your saved list is kept")
+        return {"session_id": self.session_id, "blocks": []}
 
     def _agent_turn(self, text: str) -> dict:
         self._drop_old_thinking()

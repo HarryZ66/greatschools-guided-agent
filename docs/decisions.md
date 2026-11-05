@@ -330,12 +330,39 @@ documents through a managed retrieval service, and each answer names the documen
 - Retrieval on S3 Vectors is vector-only (no hybrid keyword search), so exact short terms like
   "CTE" rely on the title and aliases being in each document's text.
 
-## 029: Cards show one "Best for ..." badge instead of a rank and a percent fit
+## 029: The saved list outlives a refresh and a new search
+
+The Vision doc ends the core journey with "save schools to a list", and login is out of scope
+("assume the user is signed in"). The session id stands in for the signed-in parent: the app keeps
+it in `localStorage` and loads `GET /api/saved` on start. A `new_search` event forgets the
+conversation (needs, results, chat history) but keeps the session id and its saves, so starting
+over never empties My list. Saves are in DynamoDB, so they also survive a server restart.
+
+## 030: ZIP codes from our data, "3 of 4 confirmed", and clock times
+
+- **ZIP codes.** The ZIP box is gone; parents say where they live in the one search box. When they
+  give only a ZIP, the agent stores it as `location.zip` and never guesses the city. Code finds the
+  area from our own schools (exact ZIP, then the same 4- and 3-digit area); a ZIP outside our data
+  gets "no schools there yet" with the areas we do cover. Eval cases `zip_only`, `zip_not_in_data`.
+- **"3 of 4 confirmed" instead of "% fit".** The percentage mixed verified checks with search
+  relevance, so a school whose data was plainly wrong (enrollment 1, 52 students per teacher)
+  showed "100% fit". The card now counts the confirmed checks listed under it, and turns amber with
+  "⚠ check data" when the school has data problems. Each problem also takes 0.02 off the score (at
+  most 3): enough that a clean school with the same checks ranks first, never enough to drop a
+  school below ones that meet fewer needs. The school stays visible, with the reason shown.
+- **Clock times.** Notes read "Care ends at 5:00 PM; you need 6:00 PM" and "Runs 5:00 PM–6:30 PM,
+  covers 5:00 PM–6:00 PM"; program cards show "Next: Tue, Nov 3 · 5:00 PM–6:30 PM". Evidence keeps
+  the raw "17:00", so grounding checks are unchanged.
+- **My list for returning parents.** The app stores the session id, starts a fresh conversation on
+  load with `new_search` (decision 029) and shows "My list (n)" on the home page.
+
+## 031: Cards show one "Best for ..." badge instead of a rank and a percent fit
 
 The team found that a rank number and "82% fit" don't help parents choose: an exact percent
 suggests a precision that doesn't matter to them, and a rank built from every preference hides
 what each school is good at. The cards now drop the rank and the percent, and move the per-need checklist to the
-details panel. Each card can carry one badge that says what the school stands out for.
+details panel. This replaces the "3 of 4 confirmed" line from decision 030 on the card; the
+data-problem penalty from 030 still applies to the order. Each card can carry one badge that says what the school stands out for.
 
 - **Code decides the badge** (decision 002), in `gs_agent/badges.py`, from the same verify rules
   as the statuses. A school earns "Best for X" only when its status for X is `confirmed` and it is
@@ -355,7 +382,7 @@ details panel. Each card can carry one badge that says what the school stands ou
 - Not done: a "culture" badge. Culture isn't in the needs catalog; it could become a need built
   on the "Belonging / Inclusion" and "Teachers / Staff" review topics.
 
-## 030: Chat replies show one sentence, with "View more" for the rest
+## 032: Chat replies show one sentence, with "View more" for the rest
 
 Replies had grown long: too much to read for a parent, or in a demo. Each agent reply now shows its
 first sentence by default. What stays visible:

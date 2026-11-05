@@ -16,7 +16,7 @@ CONFIRMED, PARTIAL, ATTENTION, MISSING = "confirmed", "partial", "needs_attentio
 # id -> (label, how the agent should fill `value`, description for the prompt)
 CATALOG: dict[str, dict[str, str]] = {
     "grade_level": {"label": "Grade level", "value": 'list of level codes: "p" pre-K, "e" elementary (K-5), "m" middle (6-8), "h" high (9-12)'},
-    "location": {"label": "Location", "value": '{"city": "Miami", "state": "FL", "radius_km": 20}'},
+    "location": {"label": "Location", "value": '{"city": "Miami", "state": "FL", "radius_km": 20}; if the parent gives only a ZIP code, {"zip": "33012", "state": "FL", "radius_km": 20} (never guess the city from a ZIP)'},
     "school_type": {"label": "School type", "value": 'list of "public", "charter", "private"'},
     "high_performing": {"label": "Highly rated", "value": "none"},
     "stem": {"label": "STEM (science, tech, math)", "value": "none"},
@@ -133,6 +133,8 @@ def plain_evidence(evidence: list[dict]) -> str:
             value = f"${value:,}/year" if isinstance(value, (int, float)) else value
         elif field == "distance_miles":
             value = f"{value} miles"
+        elif field == "after_care_end_time":
+            value = clock(value)
         elif isinstance(value, bool):
             value = "yes" if value else "no"
         elif isinstance(value, list):
@@ -142,6 +144,20 @@ def plain_evidence(evidence: list[dict]) -> str:
         label = FIELD_WORDS.get(field, field.split(":")[0].split(".")[-1].replace("_", " ").capitalize())
         parts.append(f"{label}: {value}")
     return "; ".join(parts)
+
+
+def clock(hhmm: Any) -> str:
+    """ "17:00" -> "5:00 PM", the way parents read times. Anything else is returned as is."""
+    try:
+        h, m = map(int, str(hhmm).split(":")[:2])
+    except ValueError:
+        return str(hhmm)
+    return f"{(h - 1) % 12 + 1}:{m:02d} {'AM' if h < 12 else 'PM'}"
+
+
+def place(value: dict) -> str:
+    """How to name the parent's location in a note: the city, or the ZIP code they gave."""
+    return value.get("city") or (f"ZIP {value['zip']}" if value.get("zip") else "your area")
 
 
 def km_to_miles(km: float) -> float:
@@ -177,11 +193,11 @@ def v_location(school: dict, value: Any) -> dict:
     if center and school.get("location"):
         km = round(haversine_km(center, school["location"]), 1)
         ev += [_ev("distance_km", km), _ev("distance_miles", km_to_miles(km))]
-        if school.get("city", "").lower() == str(value.get("city", "")).lower():
+        if value.get("city") and school.get("city", "").lower() == str(value["city"]).lower():
             return _result("location", CONFIRMED, ev)
         radius = value.get("radius_km", 20)
         status = CONFIRMED if km <= radius else PARTIAL
-        return _result("location", status, ev, f"About {km_to_miles(km)} miles from {value.get('city')}.")
+        return _result("location", status, ev, f"About {km_to_miles(km)} miles from {place(value)}.")
     if school.get("city", "").lower() == str(value.get("city", "")).lower():
         return _result("location", CONFIRMED, ev)
     return _result("location", PARTIAL, ev, "Outside the requested city.")
@@ -242,7 +258,7 @@ def v_after_school_care(school: dict, value: Any) -> dict:
         return _result("after_school_care", MISSING, ev, "No after-school care information. Ask the school.")
     ev = [_ev("after_care_end_time", end, school.get("after_care_as_of"))]
     if value and end < value:
-        return _result("after_school_care", PARTIAL, ev, f"Care ends at {end}; you need {value}.")
+        return _result("after_school_care", PARTIAL, ev, f"Care ends at {clock(end)}; you need {clock(value)}.")
     as_of = school.get("after_care_as_of")  # care hours have their own date, not the profile's
     age = _age_days(as_of)
     if age is not None and age > FIELD_STALE_DAYS:

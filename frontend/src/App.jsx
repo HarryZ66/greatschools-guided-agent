@@ -22,6 +22,15 @@ const EXAMPLES = [
 const humanize = id => (id || '').replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())
 const money = n => '$' + Number(n).toLocaleString('en-US')
 const miles = p => p.distance_miles ?? (p.distance_km != null ? Math.round(p.distance_km * 6.21371) / 10 : null)
+// "2026-11-03" -> "Tue, Nov 3" (UTC, so US time zones don't shift it a day) and "15:30" -> "3:30 PM"
+const day = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+const clock = t => { const [h, m] = String(t).split(':').map(Number); return Number.isNaN(h) ? t : `${(h + 11) % 12 + 1}:${String(m || 0).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` }
+
+// The session id stands in for the signed-in parent (login is out of scope), so My list
+// survives a refresh and a New search (docs/contract.md, section 3). Storage can be blocked.
+const SID_KEY = 'gs_session_id'
+const readSid = () => { try { return localStorage.getItem(SID_KEY) } catch { return null } }
+const writeSid = sid => { try { if (sid) localStorage.setItem(SID_KEY, sid) } catch { /* private mode */ } }
 
 const Logo = () => <img className="logo" src={logo} alt="GreatSchools.org" />
 
@@ -33,13 +42,11 @@ const rise = { hidden: { opacity: 0, y: 14 }, show: { opacity: 1, y: 0, transiti
 const stagger = (each = 0.07, after = 0) => ({ hidden: {}, show: { transition: { staggerChildren: each, delayChildren: after } } })
 const step = i => Math.min(i, 8) * 0.06  // cards come in one after another, capped so long lists don't wait
 
-function SearchBox({ query, setQuery, zip, setZip, onSearch, busy, compact, variants }) {
+function SearchBox({ query, setQuery, onSearch, busy, compact, variants }) {
   return (
     <motion.form variants={variants} className={'sbox' + (compact ? ' compact' : '')} onSubmit={e => { e.preventDefault(); onSearch() }}>
       <input className="q" value={query} onChange={e => setQuery(e.target.value)}
         placeholder="Tell us about your child and what you need…" aria-label="Search" />
-      <input className="zip" value={zip} onChange={e => setZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
-        placeholder="ZIP (optional)" inputMode="numeric" aria-label="ZIP code" />
       <button className={'go' + (busy ? ' busy' : '')} aria-label="Search" disabled={busy}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
       </button>
@@ -147,7 +154,7 @@ const Rosette = () => (
   </svg>
 )
 
-// One "Best for ..." per school, chosen in code (decision 029); `why` says what it's based on.
+// One "Best for ..." per school, chosen in code (decision 031); `why` says what it's based on.
 // On a card it's a ribbon tied around the card's edge, with one shine when the results land.
 function Badge({ badge, full }) {
   if (!badge) return null
@@ -210,7 +217,7 @@ function ProgramCard({ p, i = 0 }) {
       <h3>{p.url ? <a href={p.url} target="_blank" rel="noreferrer">{p.name}</a> : p.name}</h3>
       <p className="meta">{p.organization} · {p.city}{mi != null && p.near ? ` · ${mi} miles from ${p.near}` : ''}</p>
       <p className="meta">{[p.ages, p.cost, p.meets_on?.length ? `Meets ${p.meets_on.join(', ')}` : null,
-        next ? `Next: ${next.day} ${next.date} ${next.start}–${next.end}` : null, p.registration_open ? 'Sign-up open' : null].filter(Boolean).join(' · ')}</p>
+        next ? `Next: ${day(next.date)} · ${clock(next.start)}–${clock(next.end)}` : null, p.registration_open ? 'Sign-up open' : null].filter(Boolean).join(' · ')}</p>
       {p.why && <p className="why">{p.why}</p>}
       {p.time_fit && <p className={'fit ' + status(p.time_fit.status).cls}>{status(p.time_fit.status).icon} {p.time_fit.note}</p>}
       {p.quality_flags?.length > 0 && <p className="watch"><b>Good to know:</b> {p.quality_flags.map(f => f.note).join(' ')}</p>}
@@ -321,7 +328,7 @@ function Rate({ vote, onVote }) {
   )
 }
 
-// Splits a reply into its first sentence and the rest, for the short view (decision 030).
+// Splits a reply into its first sentence and the rest, for the short view (decision 032).
 // Code only, so the prompt and evals don't change. A boundary is ., ! or ? followed by a
 // space and a word that doesn't start lowercase (so "St. Johns" and "4.5 miles" don't split),
 // or a line break. A first sentence under 25 characters ("Good question.") takes the next one too.
@@ -433,7 +440,6 @@ function Chat({ msgs, progress, busy, question, send, onOption, onVote, onOpenCo
 
 export default function App() {
   const [query, setQuery] = useState('')
-  const [zip, setZip] = useState('')
   const [stage, setStage] = useState('home')
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
@@ -465,6 +471,7 @@ export default function App() {
   const apply = (res, kind) => {
     session.current = res.session_id
     setSessionId(res.session_id)
+    writeSid(res.session_id)
     const reply = { r: 'ai', t: '', trace: res.trace, turn: res.turn }
     let nextQuestion = null
     const results = (res.blocks || []).find(b => b.type === 'school_results')?.results
@@ -510,7 +517,7 @@ export default function App() {
     if (!text || busy) return
     setQuery(text)
     setStage('results')
-    run({ type: 'query', text: zip ? `${text} (near ZIP ${zip})` : text }, zip ? `${text} · ZIP ${zip}` : text)
+    run({ type: 'query', text }, text)
   }
 
   const send = text => question
@@ -551,12 +558,29 @@ export default function App() {
 
   const toggle = id => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : p.length >= 2 ? [p[1], id] : [...p, id])
 
-  const newSearch = () => {
-    session.current = null
-    setSessionId(null); setChips(null); setSchools([]); setPrograms(null); setMsgs([]); setQuestion(null)
-    setPicked([]); setSaved(new Map()); setShowSaved(false); setQuery(''); setZip(''); setStage('home')
-    setPane('schools'); setUnread(false)
+  // Start over with the same parent: the server forgets the conversation and returns the kept list
+  const restart = async sid => {
+    if (!sid) return
+    try {
+      const res = await turn(sid, { type: 'new_search' })
+      session.current = res.session_id
+      setSessionId(res.session_id)
+      writeSid(res.session_id)
+      setSaved(new Map((res.saved || []).map(s => [s.school_id, s])))
+    } catch { /* the list just stays as it is */ }
   }
+
+  const newSearch = () => {
+    setChips(null); setSchools([]); setPrograms(null); setMsgs([]); setQuestion(null)
+    setPicked([]); setShowSaved(false); setQuery(''); setStage('home')
+    setPane('schools'); setUnread(false)
+    restart(session.current)
+  }
+
+  useEffect(() => {  // a returning parent: fresh conversation, same saved list
+    const sid = readSid()
+    if (sid) { session.current = sid; setSessionId(sid); restart(sid) }
+  }, [])
 
   const drag = e => {
     e.preventDefault()
@@ -569,12 +593,19 @@ export default function App() {
     <MotionConfig reducedMotion="user">
     <div className={'app s-' + stage}>
       <section className="page pg-home">
-        <header><Logo /></header>
+        <header>
+          <Logo />
+          {saved.size > 0 && (  // a returning parent sees the list they saved last time
+            <button className="savedn on home-saved" onClick={() => { setStage('results'); setShowSaved(true) }}>
+              ♥ My list ({saved.size})
+            </button>
+          )}
+        </header>
         {/* The one entrance on page load: headline, line, search box, then the examples */}
         <motion.main initial="hidden" animate="show" variants={stagger(0.09, 0.1)}>
           <motion.h1 variants={rise}>Find the right school, together.</motion.h1>
           <motion.p variants={rise}>Tell us about your child and what matters to your family. We investigate. You decide.</motion.p>
-          <SearchBox variants={rise} {...{ query, setQuery, zip, setZip, busy }} onSearch={() => search()} />
+          <SearchBox variants={rise} {...{ query, setQuery, busy }} onSearch={() => search()} />
           <motion.div className="examples" variants={stagger(0.06)}>
             <motion.span variants={rise}>Not sure what to ask? Try:</motion.span>
             {EXAMPLES.map(x => <motion.button key={x} variants={rise} whileTap={{ scale: 0.96 }} onClick={() => search(x)} disabled={busy}>{x}</motion.button>)}
@@ -585,7 +616,7 @@ export default function App() {
       <section className="page pg-results">
         <header>
           <Logo />
-          <SearchBox compact {...{ query, setQuery, zip, setZip, busy }} onSearch={() => search()} />
+          <SearchBox compact {...{ query, setQuery, busy }} onSearch={() => search()} />
           <div className="savedw">
             <button className={'savedn' + (saved.size ? ' on' : '')} onClick={() => setShowSaved(v => !v)} aria-expanded={showSaved}>
               ♥ My list{saved.size > 0 && <> (<motion.span className="n" key={saved.size} initial={{ scale: 1.6 }} animate={{ scale: 1 }} transition={spring}>{saved.size}</motion.span>)</>}

@@ -1,4 +1,4 @@
-"""The one "Best for ..." badge per card: decided in code, never claimed on a tie (decision 029)."""
+"""The one "Best for ..." badge per card: decided in code, never claimed on a tie (decision 031)."""
 
 from gs_agent import badges
 from gs_agent import needs as N

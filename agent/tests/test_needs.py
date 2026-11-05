@@ -36,7 +36,7 @@ def test_care_ending_before_needed_time_is_partial():
     r = N.verify(osp_school(after_care_end_time="17:00", after_care_as_of="2026-09-01"),
                  need("after_school_care", value="18:00"))
     assert r["status"] == N.PARTIAL
-    assert "17:00" in r["note"] and "18:00" in r["note"]
+    assert "5:00 PM" in r["note"] and "6:00 PM" in r["note"]
 
 
 def test_care_until_needed_time_is_confirmed():
