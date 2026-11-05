@@ -404,3 +404,30 @@ first sentence by default. What stays visible:
 - Known gap: a data problem that the model writes into the text itself, not as a callout, is
   behind "View more" and gets no hint. If that turns out to be common, the fix is in the prompt
   (put such facts in a callout), not here.
+
+## 033: Most turns run on Claude Haiku 5.5; code sends sensitive and failed turns to Sonnet 5.5
+
+At GreatSchools' scale (about 40M families a year), the model is almost the whole cost of the
+agent; compute and search are about 1% of it. Sonnet 5.5 on every turn would cost hundreds of
+thousands of dollars a year if 1 in 5 families used guided search. Haiku 5.5 costs about a
+twentieth as much per token, and passed 34 of 36 evals on its own.
+
+- **Code picks the model, before any model reads the turn** (`gs_agent/routing.py`). Haiku 5.5 by
+  default. Sonnet 5.5 when the parent's words touch race or ethnicity, national origin, religion,
+  income or a child's disability (an English and Spanish word list). Matching too much costs a
+  few cents; missing one risks a hurtful reply. A conversation that touched one of these stays
+  on Sonnet until "New search", so its follow-up turns keep that care.
+- **A failed Haiku turn is retried on Sonnet** from the same history before the code fallback
+  (contract section 5). The trace shows it as an `escalate` step.
+- **Both models get the same prompt, tools and checks.** Statuses, evidence, badges and grounding
+  stay in code (decision 002), so a cheaper model can't make the cards wrong.
+- **Prompt fixes from the Haiku run, for both models:** classes for the parent or family are
+  programs (search them without asking for a grade), and a parent describing their own family
+  ("we're low-income") gets help, not a line about what we can't filter by. Sonnet also added
+  that line now and then.
+- Thinking effort stays at each model's default: the team chose not to trade reasoning for cost.
+- The prompt cache is per model, so a switch mid-conversation starts that turn with a cold cache.
+  Keeping sensitive conversations on Sonnet avoids switching back and forth.
+- `FAST_MODEL` and `STRONG_MODEL` set the tiers. `MAIN_MODEL` pins every turn to one model; the
+  evals use it to compare models (`run_evals.py --model ...`). Eval costs now price each model's
+  tokens at its own list price ($0.10 / $0.50 and $2 / $10 per million input / output tokens).

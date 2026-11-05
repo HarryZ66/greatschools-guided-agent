@@ -6,7 +6,11 @@ from pathlib import Path
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-MAIN_MODEL = os.environ.get("MAIN_MODEL", "us.anthropic.claude-sonnet-5-5")
+# Model tiers (decision 033): most turns on the fast model, sensitive or failed ones on the strong one.
+FAST_MODEL = os.environ.get("FAST_MODEL", "us.anthropic.claude-haiku-5-5")
+STRONG_MODEL = os.environ.get("STRONG_MODEL", "us.anthropic.claude-sonnet-5-5")
+# Set MAIN_MODEL to run every turn on one model (the evals use it to compare models).
+MAIN_MODEL = os.environ.get("MAIN_MODEL") or None
 EMBED_MODEL = "amazon.titan-embed-text-v2:0"
 EMBED_DIMS = 1024
 SCHOOLS_INDEX = "schools"

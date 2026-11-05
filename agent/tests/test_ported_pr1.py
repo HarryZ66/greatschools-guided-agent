@@ -110,7 +110,7 @@ def test_failed_model_turn_answers_from_code_without_stale_results():
         def __call__(self, *a, **k):
             raise RuntimeError("model down")
     s.agent = BrokenAgent()
-    s._new_agent = lambda messages=None: BrokenAgent()  # the fallback restarts the conversation
+    s._new_agent = lambda **k: BrokenAgent()  # the retry and the fallback start fresh agents
     out = s._agent_turn("Middle school near Miami")
     assert out["fallback"] is True
     assert not any(b["type"] == "school_results" for b in out["blocks"])  # no search ran this turn

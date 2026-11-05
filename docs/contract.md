@@ -187,7 +187,9 @@ list; it answers "is this an agent or a chatbot?" and shows which AWS service di
 
 `tool` is one of `understand`, `find_schools`, `verify`, `trade_offs`, `keep_values`,
 `get_school_profile`, `find_school_by_name`, `lookup_content`, `search_programs`, `compare`,
-`ground`, `rerank` (chip edits, no model call) or `fallback`. `ms` is present for steps that call
+`ground`, `rerank` (chip edits, no model call), `escalate` (the fast model couldn't finish, so the
+strong model took the turn), `new_search` or `fallback`. The `understand` step's `service` names the
+model that answered the turn (decision 033). `ms` is present for steps that call
 a service. Render `service` and `text` as given; new `tool` values may appear later.
 
 ### `criteria_chips`
