@@ -41,6 +41,8 @@ each one answers is in [`pain-points.md`](pain-points.md). How each one is built
 - **"How I checked this"** under every reply shows the steps the agent really took. [022]
 - **Plain words.** No "IEP", "504" or "CTE" unless the parent uses them; distances in miles;
   ratings as "4 out of 10". [024]
+- **Quick dictionary.** School terms that still appear, like "Charter", "STEM" or "AP", have a
+  dashed underline. Hover or tap to see what they mean in one line. [044]
 - **Short replies.** Each reply shows one sentence, with "View more" for the rest. [033]
 
 ## 4. Understand the cost

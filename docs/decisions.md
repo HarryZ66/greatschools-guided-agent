@@ -648,3 +648,22 @@ fill in through the questions the agent asks.
 
 - The app no longer draws the meter. `profile` stays in `search_summary` and code still tracks the
   topics, so the agent keeps asking one question at a time until it knows the family.
+
+## 044: School terms get a dashed underline with a short meaning
+
+Plain words (decision 024) keep most jargon out, but some terms stay: school types ("Charter"), the
+words a parent uses ("IEP"), sample searches, and terms inside the agent's replies and the data
+notes. Parents shouldn't have to leave the page or ask to learn what they mean.
+
+- **A quick dictionary in the app** (`frontend/src/Glossary.jsx`): about 25 terms (STEM, IEP, 504
+  plan, ELL, AP, IB, CTE, charter, magnet, lottery, voucher, ESA and others) get a dashed underline.
+  Hover, keyboard focus or a tap shows the term and a one-line meaning, shortened from the parent
+  guide. Escape, moving away or tapping elsewhere closes it.
+- **Where:** chat replies, questions and answer options, chips, suggestions, school type tags,
+  badges, "Good to know" notes, fit checks, the comparison table and program notes. Each term is
+  underlined once per piece of text so a page doesn't fill with lines. Inside a button or chip the
+  underline and hover work, and a tap still does what the button does.
+- **Careful matching:** acronyms match only in capitals ("AP", not "ap"; "ESA", not Spanish "esa"),
+  and "504" isn't matched inside a price like "$16,504".
+- The first sample search on the home page now says "science and robotics" instead of "STEM".
+- Frontend only: the API, prompt and evals don't change.

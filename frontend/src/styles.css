@@ -309,3 +309,10 @@ blockquote small{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 .modal.visit .send{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}
 .modal.visit .send small{color:var(--mut);font-size:12px}
 .modal.visit .sent .big{font-size:18px;font-weight:700;color:var(--ok);margin:4px 0 8px}
+
+/* quick dictionary: school terms get a dashed underline and a short meaning (decision 044) */
+.gloss{text-decoration:underline dashed;text-decoration-color:color-mix(in srgb,currentColor 55%,transparent);text-decoration-thickness:1px;text-underline-offset:3px;cursor:help;border-radius:2px}
+.gloss:hover{text-decoration-color:currentColor}
+.gloss:focus-visible{outline:2px solid var(--green);outline-offset:1px}
+.gloss-tip{position:fixed;z-index:1000;max-width:280px;padding:9px 12px;border-radius:10px;background:var(--navy);color:#fff;font-size:13px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;box-shadow:0 8px 24px rgba(20,48,74,.25);pointer-events:none}
+.gloss-tip b{display:block;margin-bottom:2px;font-weight:700}
