@@ -1,4 +1,4 @@
-"""Model tiers (decision 033): code picks the model per turn, and a failed fast turn goes to the strong one."""
+"""Model tiers (decision 034): code picks the model per turn, and a failed fast turn goes to the strong one."""
 
 from types import SimpleNamespace
 

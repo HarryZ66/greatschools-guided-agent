@@ -76,7 +76,7 @@ class ChipLabel(BaseModel):
 class Question(BaseModel):
     text: str = Field(description="One short question in plain language")
     why: str = Field(description="One short sentence: why the answer changes the results")
-    # Code gives each option its id, so the model only writes the words (decision 034)
+    # Code gives each option its id, so the model only writes the words (decision 035)
     options: list[str] = Field(description="2-4 short tappable answers")
 
 
@@ -514,7 +514,7 @@ class GuidedSession:
         raise ValueError(f"Unknown event type: {kind}")
 
     def _fast_turn(self, text: str) -> dict | None:
-        """A plain grade-and-place search, answered in code without the model (decision 035).
+        """A plain grade-and-place search, answered in code without the model (decision 036).
 
         Returns None to hand the message to the model: when it asks for anything else, when we
         have no schools there (the model explains where we do), or when code spots a trade-off
@@ -551,7 +551,7 @@ class GuidedSession:
         return response
 
     def _replay(self, cached: dict) -> dict:
-        """Answer with another parent's identical first turn from today (decision 035)."""
+        """Answer with another parent's identical first turn from today (decision 036)."""
         self.restore(cached["state"])
         self._step("cache", "Amazon DynamoDB",
                    "Another parent asked exactly this today, so I reused that checked answer without calling "
@@ -573,7 +573,7 @@ class GuidedSession:
     _SETS = ("seen_ids", "seen_programs")
 
     def snapshot(self) -> dict:
-        """The conversation as plain JSON, to restore in another process (decisions 035 and 036).
+        """The conversation as plain JSON, to restore in another process (decisions 036 and 037).
 
         Holds the needs, the last results, the open question and the model's history (without
         thinking, which is bound to the turn that wrote it). Not the parent's identity or saves.

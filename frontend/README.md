@@ -53,7 +53,7 @@ for reduced motion.
     buttons that send an `answer`; typing while a question is open answers it too. Each reply
     shows its first sentence and the question; "View more" opens the rest of the text, the data
     notes (`evidence_callout`), the question's `why` and guide sources. A collapsed reply with data
-    notes shows "⚠️ 1 data note" (decision 032).
+    notes shows "⚠️ 1 data note" (decision 033).
   - `comparison`: the Compare modal (pick 2 schools, then "Compare schools"). The reply in the chat
     carries the summary and an "Open the comparison table" link.
   - `trace` and `turn`: under each reply, "How I checked this" and "Helpful? 👍 👎" (rates that reply).

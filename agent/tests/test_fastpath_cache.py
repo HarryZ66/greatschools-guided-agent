@@ -1,4 +1,4 @@
-"""Plain searches skip the model, and identical first questions reuse today's answer (decision 035)."""
+"""Plain searches skip the model, and identical first questions reuse today's answer (decision 036)."""
 
 from types import SimpleNamespace
 

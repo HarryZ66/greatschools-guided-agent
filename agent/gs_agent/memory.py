@@ -1,4 +1,4 @@
-"""Conversations that outlive their process, in AgentCore Memory (decision 036).
+"""Conversations that outlive their process, in AgentCore Memory (decision 037).
 
 Each parent's conversation runs in its own AgentCore Runtime microVM, which ends after 30 idle
 minutes, 8 hours, or a deploy. After every turn the API saves the conversation's state

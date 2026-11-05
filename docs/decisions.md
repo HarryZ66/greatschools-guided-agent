@@ -356,7 +356,7 @@ over never empties My list. Saves are in DynamoDB, so they also survive a server
 - **My list for returning parents.** The app stores the session id, starts a fresh conversation on
   load with `new_search` (decision 029) and shows "My list (n)" on the home page.
 
-## 031: Cards show one "Best for ..." badge instead of a rank and a percent fit
+## 032: Cards show one "Best for ..." badge instead of a rank and a percent fit
 
 The team found that a rank number and "82% fit" don't help parents choose: an exact percent
 suggests a precision that doesn't matter to them, and a rank built from every preference hides
@@ -382,7 +382,7 @@ data-problem penalty from 030 still applies to the order. Each card can carry on
 - Not done: a "culture" badge. Culture isn't in the needs catalog; it could become a need built
   on the "Belonging / Inclusion" and "Teachers / Staff" review topics.
 
-## 032: Chat replies show one sentence, with "View more" for the rest
+## 033: Chat replies show one sentence, with "View more" for the rest
 
 Replies had grown long: too much to read for a parent, or in a demo. Each agent reply now shows its
 first sentence by default. What stays visible:
@@ -405,7 +405,7 @@ first sentence by default. What stays visible:
   behind "View more" and gets no hint. If that turns out to be common, the fix is in the prompt
   (put such facts in a callout), not here.
 
-## 033: Most turns run on Claude Haiku 5.5; code sends sensitive and failed turns to Sonnet 5.5
+## 034: Most turns run on Claude Haiku 5.5; code sends sensitive and failed turns to Sonnet 5.5
 
 At GreatSchools' scale (about 40M families a year), the model is almost the whole cost of the
 agent; compute and search are about 1% of it. Sonnet 5.5 on every turn would cost hundreds of
@@ -432,14 +432,14 @@ twentieth as much per token, and passed 34 of 36 evals on its own.
   evals use it to compare models (`run_evals.py --model ...`). Eval costs now price each model's
   tokens at its own list price ($0.10 / $0.50 and $2 / $10 per million input / output tokens).
 
-## 034: The model writes less: shorter messages, one-line reasons, option words only
+## 035: The model writes less: shorter messages, one-line reasons, option words only
 
 Output tokens cost 5× input tokens, and most of what the model writes is structured data, not the
 reply a parent reads. Thinking stays at each model's default (the team chose not to cut reasoning),
 so this trims only the structured reply:
 
 - The message is 1–2 short sentences, most important first (was 1–3). It pairs with "View more"
-  (decision 032): the first sentence is what parents see.
+  (decision 033): the first sentence is what parents see.
 - The question's `why` is one short sentence. It sits behind "View more".
 - The model writes answer options as plain words; code numbers them (`o1`, `o2`, ...). The API
   still returns `{"id", "label"}` options.
@@ -451,7 +451,7 @@ median 355 → 293 characters (−18%), still 38 / 38. Cost per turn didn't move
 with Haiku answering most turns, Sonnet's share (11% of calls, 71% of cost) matters far more
 than reply length, so the sensitive-topic list in `routing.py` is the next cost lever to review.
 
-## 035: Plain searches skip the model, and identical first questions reuse today's answer
+## 036: Plain searches skip the model, and identical first questions reuse today's answer
 
 GreatSchools' own search already runs as classic filters: grade, place, type. A parent who types
 just that doesn't need an AI model to read it, and many parents ask the same first question.
@@ -477,13 +477,13 @@ just that doesn't need an AI model to read it, and many parents ask the same fir
   (`--cache` turns it on) so they keep measuring the agent. A cache failure never fails a turn.
 - The conversation's state round-trips as JSON (`GuidedSession.snapshot` / `restore`): needs,
   last results, the open question, chip labels and the model's history without thinking blocks.
-  Decision 036 uses the same snapshot to keep conversations across restarts.
+  Decision 037 uses the same snapshot to keep conversations across restarts.
 - Eval checks fixed in this change: "can't sort" now counts as declining a demographic filter
   (the agent said "I can't sort or choose neighborhoods by how many low-income families live
   there"), and `subgroup_help_ok` accepts `high_performing` ("which schools do well for kids like
   him" can fairly mean highly rated).
 
-## 036: Conversations outlive their microVM, in AgentCore Memory
+## 037: Conversations outlive their microVM, in AgentCore Memory
 
 Each parent's conversation runs in its own AgentCore Runtime microVM, which ends after 30 idle
 minutes, 8 hours, or any deploy. Until now that dropped the conversation: the parent's saved list

@@ -1,4 +1,4 @@
-"""A shared cache of first-turn answers (decision 035).
+"""A shared cache of first-turn answers (decision 036).
 
 On AgentCore Runtime every parent's conversation runs in its own microVM, so a cache has to live
 outside the process: it's in the app's DynamoDB table. When a parent's first message matches one

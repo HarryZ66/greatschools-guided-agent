@@ -1,4 +1,4 @@
-"""Which model answers a turn (decision 033).
+"""Which model answers a turn (decision 034).
 
 Most turns run on the fast model (Claude Haiku 5.5). Code sends a turn to the strong model
 (Claude Sonnet 5.5) when the parent's words touch a topic where a careless reply does real harm:

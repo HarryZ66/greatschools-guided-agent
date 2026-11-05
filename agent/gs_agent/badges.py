@@ -1,4 +1,4 @@
-"""One "Best for ..." badge per school card, decided in code (decision 031).
+"""One "Best for ..." badge per school card, decided in code (decision 032).
 
 A school earns "Best for X" only when its status for X is confirmed and it is the single
 strongest of the schools shown, measured by a value in the data (latest care pickup, fewest

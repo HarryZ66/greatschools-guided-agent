@@ -50,7 +50,7 @@ async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
 
 
 # One agent conversation per parent, in this process. After every turn it's also saved to
-# AgentCore Memory (decision 036), so a conversation this process doesn't have (a new microVM,
+# AgentCore Memory (decision 037), so a conversation this process doesn't have (a new microVM,
 # a restart, a deploy) is loaded from there.
 _sessions: dict[str, GuidedSession] = {}
 _locks: dict[str, threading.Lock] = {}

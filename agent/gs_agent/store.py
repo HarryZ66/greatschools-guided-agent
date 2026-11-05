@@ -96,7 +96,7 @@ def metrics() -> dict:
     }
 
 
-# ---------------------------------------------------------------- first-turn answer cache (decision 035)
+# ---------------------------------------------------------------- first-turn answer cache (decision 036)
 # pk = CACHE#<sha256 of the normalized message, day and models>, sk = TURN. `expires` is epoch
 # seconds: reads ignore expired items, and the table's TTL deletes them.
 

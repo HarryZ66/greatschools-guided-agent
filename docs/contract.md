@@ -192,7 +192,7 @@ strong model took the turn), `fast_path` (a plain grade-and-place search answere
 call), `cache` (another parent's identical first question from today, reused; the steps after it
 ran for that answer), `memory` (a new process picked the conversation up from AgentCore Memory),
 `runtime`, `new_search` or `fallback`. The `understand` step's `service` names the
-model that answered the turn (decision 033). `ms` is present for steps that call
+model that answered the turn (decision 034). `ms` is present for steps that call
 a service. Render `service` and `text` as given; new `tool` values may appear later.
 
 ### `criteria_chips`
@@ -268,7 +268,7 @@ Streamed while the agent works (the "I checked this for you" trace).
 ```
 
 `badge` is one "Best for ..." per school, or `null`, decided in code (`gs_agent/badges.py`,
-decision 031). A school earns it only when its status for that need is `confirmed` and it is the
+decision 032). A school earns it only when its status for that need is `confirmed` and it is the
 single strongest of the schools shown on a value in the data; a tie gives nobody the badge. Each
 school gets at most one badge and each need goes to at most one school. The parent's needs come
 first (must-haves, then nice-to-haves; `avoid` needs never give a badge), then extra needs the

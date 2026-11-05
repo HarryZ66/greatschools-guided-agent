@@ -172,7 +172,7 @@ class AppStack(Stack):
                 "Principal": {"AWS": runtime_role.role_arn},
                 "Action": "bedrock-agentcore:InvokeGateway", "Resource": gateway.attr_gateway_arn}]}))
 
-        # AgentCore Memory, short-term only (decision 036): after every turn the agent saves the
+        # AgentCore Memory, short-term only (decision 037): after every turn the agent saves the
         # conversation's state as an event, so a new microVM (idle timeout, deploy) picks it up.
         # No extraction strategies: nothing is summarized or kept beyond the conversation, and
         # events expire after 7 days, the shortest setting.

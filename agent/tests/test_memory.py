@@ -1,4 +1,4 @@
-"""Conversations outlive their process, in AgentCore Memory (decision 036)."""
+"""Conversations outlive their process, in AgentCore Memory (decision 037)."""
 
 from datetime import datetime, timedelta, timezone
 

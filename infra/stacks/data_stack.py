@@ -49,7 +49,7 @@ class DataStack(Stack):
 
         # One table for saved schools, feedback, search metrics and cached first-turn answers.
         # pk = SESSION#<id>; sk = SAVED#<school_id> | FEEDBACK#... | SEARCH#<ts>. pk = CACHE#<key>; sk = TURN.
-        # Cached answers carry `expires` (epoch seconds); TTL deletes them (decision 035).
+        # Cached answers carry `expires` (epoch seconds); TTL deletes them (decision 036).
         self.table = dynamodb.Table(
             self,
             "AppTable",

@@ -154,7 +154,7 @@ const Rosette = () => (
   </svg>
 )
 
-// One "Best for ..." per school, chosen in code (decision 031); `why` says what it's based on.
+// One "Best for ..." per school, chosen in code (decision 032); `why` says what it's based on.
 // On a card it's a ribbon tied around the card's edge, with one shine when the results land.
 function Badge({ badge, full }) {
   if (!badge) return null
@@ -328,7 +328,7 @@ function Rate({ vote, onVote }) {
   )
 }
 
-// Splits a reply into its first sentence and the rest, for the short view (decision 032).
+// Splits a reply into its first sentence and the rest, for the short view (decision 033).
 // Code only, so the prompt and evals don't change. A boundary is ., ! or ? followed by a
 // space and a word that doesn't start lowercase (so "St. Johns" and "4.5 miles" don't split),
 // or a line break. A first sentence under 25 characters ("Good question.") takes the next one too.
